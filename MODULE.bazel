@@ -1,0 +1,28 @@
+"""
+ALE Bazel
+"""
+module(
+    name = "hello_world_cpp",
+    version = "0.1.0",
+)
+
+bazel_dep(name = "rules_cc", version = "0.0.9")
+bazel_dep(name = "rules_foreign_cc", version = "0.10.1")
+bazel_dep(name = "zlib", version = "1.3.1.bcr.6")
+
+# Use C++20 standard
+cc_common_attributes = use_extension("@rules_cc//cc:extensions.bzl", "cc_common")
+cc_common_attributes.update_attributes(
+    copts = ["-std=c++20"],
+)
+use_repo(cc_common_attributes, "cc_common")
+
+http_archive = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
+
+http_archive(
+    name = "arcade_learning_environment",
+    urls = ["https://github.com/Farama-Foundation/Arcade-Learning-Environment/archive/refs/tags/v0.11.1.tar.gz"],
+    strip_prefix = "Arcade-Learning-Environment-0.11.1",
+    build_file = "//third_party:ale.BUILD",
+    integrity = "sha256-K4eK4bf+u0mMerU1F5HG2YONwhS0gl7sDfG1O1i2qqM=",
+)

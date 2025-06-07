@@ -27,6 +27,14 @@ http_archive(
     integrity = "sha256-K4eK4bf+u0mMerU1F5HG2YONwhS0gl7sDfG1O1i2qqM=",
 )
 
+bazel_dep(name = "platforms", version = "0.0.10")
+
+libtorch_extension = use_extension("//third_party:libtorch.bzl", "libtorch_configure_extension")
+libtorch_extension.configure(
+    version = "2.4.1",  # Specify your desired version here
+)
+use_repo(libtorch_extension, "libtorch")
+
 # Hedron's Compile Commands Extractor for Bazel
 # https://github.com/hedronvision/bazel-compile-commands-extractor
 bazel_dep(name = "hedron_compile_commands", dev_dependency = True)

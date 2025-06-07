@@ -4,5 +4,6 @@ refresh_compile_commands(
     name = "refresh_compile_commands",
     targets = {
         "//src:ale_example": "",
+        "//src:libtorch_example": "",
     },
 )

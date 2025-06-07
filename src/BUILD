@@ -12,3 +12,13 @@ cc_binary(
         "@zlib",
     ],
 )
+
+cc_binary(
+    name = "libtorch_example",
+    srcs = [
+        "libtorch_example.cc",
+    ],
+    deps = [
+        "@libtorch//:torch",
+    ],
+)

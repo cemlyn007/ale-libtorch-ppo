@@ -4,7 +4,7 @@
         {
             "label": "build",
             "type": "shell",
-            "command": "bazel build --compilation_mode=dbg //src:ale_example",
+            "command": "bazel build --compilation_mode dbg --spawn_strategy=local --features=oso_prefix_is_pwd --strip=never //src:ale_example",
             "group": {
                 "kind": "build",
                 "isDefault": true

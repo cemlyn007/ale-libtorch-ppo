@@ -25,6 +25,20 @@
                 },
             ],
             "preLaunchTask": "build",
+        },
+        {
+            "name": "(lldb) Launch",
+            "type": "lldb",
+            "request": "launch",
+            "program": "${workspaceFolder}/bazel-bin/src/ale_example.runfiles/_main/src/ale_example",
+            "cwd": "${workspaceFolder}/bazel-bin/src/ale_example.runfiles/_main/src",
+            "args": [
+                "${workspaceFolder}/roms/breakout.bin",
+            ],
+            "sourceMap": {
+                ".": "${workspaceFolder}"
+            },
+            "preLaunchTask": "build",
         }
     ]
 }

@@ -21,6 +21,14 @@ cmake(
         "-Wno-error=unused-variable",
         "-Wno-error=sequence-point",
         "-Wno-error=sign-compare",
+        # MacOS
+        "-Wno-error=unused-private-field",
+        "-Wno-inconsistent-missing-override",
+    ],
+    generate_args = [
+        "-DCMAKE_OSX_DEPLOYMENT_TARGET=15.0",
+        "-DCMAKE_AR=/usr/bin/ar",
+        "-DCMAKE_RANLIB=/usr/bin/ranlib",
     ],
     lib_source = ":ale_sources",
     linkopts = ["-lpthread"],

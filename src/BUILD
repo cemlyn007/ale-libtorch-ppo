@@ -3,9 +3,6 @@ load("@rules_cc//cc:defs.bzl", "cc_binary")
 cc_binary(
     name = "ale_example",
     srcs = ["ale_example.cc"],
-    copts = [
-        "-std=c++20",
-    ],
     deps = [
         "@arcade_learning_environment//:ale",
     ],
@@ -14,9 +11,6 @@ cc_binary(
 cc_binary(
     name = "ale_libtorch_example",
     srcs = ["ale_libtorch_example.cc"],
-    copts = [
-        "-std=c++20",
-    ],
     deps = [
         "@arcade_learning_environment//:ale",
         "@libtorch//:torch",

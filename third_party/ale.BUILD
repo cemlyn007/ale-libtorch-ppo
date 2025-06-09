@@ -15,23 +15,39 @@ cmake(
         "BUILD_VECTOR_XLA_LIB": "OFF",
         "SDL_SUPPORT": "OFF",
     },
-    copts = [
-        "-pthread",
-        "-Wno-error=unused-but-set-variable",
-        "-Wno-error=unused-variable",
-        "-Wno-error=sequence-point",
-        "-Wno-error=sign-compare",
-        # MacOS
-        "-Wno-error=unused-private-field",
-        "-Wno-inconsistent-missing-override",
-    ],
-    generate_args = [
-        "-DCMAKE_OSX_DEPLOYMENT_TARGET=15.0",
-        "-DCMAKE_AR=/usr/bin/ar",
-        "-DCMAKE_RANLIB=/usr/bin/ranlib",
-    ],
+    copts = select({
+        "@platforms//os:linux": [
+            "-Wno-error=unused-but-set-variable",
+            "-Wno-error=unused-variable",
+            "-Wno-error=sequence-point",
+            "-Wno-error=sign-compare",
+        ],
+        "@platforms//os:macos": [
+            "-Wno-error=unused-private-field",
+            "-Wno-inconsistent-missing-override",
+        ],
+        "//conditions:default": [],
+    }),
+    generate_args = select({
+        "@platforms//os:macos": [
+            "-DCMAKE_OSX_DEPLOYMENT_TARGET=15.0",
+            "-DCMAKE_AR=/usr/bin/ar",
+            "-DCMAKE_RANLIB=/usr/bin/ranlib",
+        ],
+        "//conditions:default": [],
+    }),
     lib_source = ":ale_sources",
-    linkopts = ["-lpthread"],
+    linkopts = select({
+        "@platforms//os:linux": [
+            "-lpthread",
+            "-Wno-stringop-overflow",
+        ],
+        "@platforms//os:macos": ["-lpthread"],
+        "//conditions:default": [],
+    }),
     out_static_libs = ["libale.a"],
     visibility = ["//visibility:public"],
+    deps = [
+        "@zlib",
+    ],
 )

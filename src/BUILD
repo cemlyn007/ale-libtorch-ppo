@@ -6,10 +6,20 @@ cc_binary(
     copts = [
         "-std=c++20",
     ],
-    linkopts = ["-lz"],
     deps = [
         "@arcade_learning_environment//:ale",
-        "@zlib",
+    ],
+)
+
+cc_binary(
+    name = "ale_libtorch_example",
+    srcs = ["ale_libtorch_example.cc"],
+    copts = [
+        "-std=c++20",
+    ],
+    deps = [
+        "@arcade_learning_environment//:ale",
+        "@libtorch//:torch",
     ],
 )
 

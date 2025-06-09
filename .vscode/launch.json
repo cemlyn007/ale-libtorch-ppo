@@ -8,9 +8,9 @@
             "name": "(gdb) Launch",
             "type": "cppdbg",
             "request": "launch",
-            "program": "${workspaceFolder}/bazel-bin/src/ale_example",
+            "program": "${workspaceFolder}/bazel-bin/src/ale_libtorch_example",
             "args": [
-                "/home/cemlyn/Development/ale-bazel/roms/breakout.bin",
+                "${workspaceFolder}/roms/breakout.bin",
             ],
             "stopAtEntry": false,
             "cwd": "${workspaceFolder}",
@@ -30,8 +30,8 @@
             "name": "(lldb) Launch",
             "type": "lldb",
             "request": "launch",
-            "program": "${workspaceFolder}/bazel-bin/src/ale_example.runfiles/_main/src/ale_example",
-            "cwd": "${workspaceFolder}/bazel-bin/src/ale_example.runfiles/_main/src",
+            "program": "${workspaceFolder}/bazel-bin/src/ale_libtorch_example.runfiles/_main/src/ale_libtorch_example",
+            "cwd": "${workspaceFolder}/bazel-bin/src/ale_libtorch_example.runfiles/_main/src",
             "args": [
                 "${workspaceFolder}/roms/breakout.bin",
             ],

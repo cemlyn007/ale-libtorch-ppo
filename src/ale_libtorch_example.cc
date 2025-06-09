@@ -15,7 +15,7 @@ int main(int argc, char **argv) {
   }
   std::cout << tensor << std::endl;
 
-  ai::rollout::Rollout rollout(std::filesystem::path(path), 128, 10, 1000);
+  ai::rollout::Rollout rollout(std::filesystem::path(path), 128, 10, 1000, 4);
   for (size_t i = 0; i < 1000; i++) {
     std::cout << "Rollout " << i + 1 << " of 1000" << std::endl;
     rollout.rollout();

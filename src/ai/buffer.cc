@@ -1,18 +1,18 @@
 #include "buffer.h"
 #include <torch/torch.h>
 namespace ai::buffer {
-Buffer::Buffer(int capacity, std::vector<size_t> observation_shape,
-               int action_size)
+Buffer::Buffer(size_t capacity, std::vector<size_t> observation_shape)
     : capacity_(capacity), indices_(0) {
   observation_shape_ =
       std::vector<int64_t>(observation_shape.begin(), observation_shape.end());
   auto buffer_observation_shape = observation_shape_;
   buffer_observation_shape.insert(buffer_observation_shape.begin(), capacity_);
   observations_ = torch::zeros(buffer_observation_shape, torch::kByte);
-  actions_ = torch::zeros({capacity_, action_size});
-  rewards_ = torch::zeros({capacity_});
-  terminals_ = torch::zeros({capacity_}, torch::kBool);
-  truncations_ = torch::zeros({capacity_}, torch::kBool);
+  long capacity_long = static_cast<long>(capacity_);
+  actions_ = torch::zeros({capacity_long});
+  rewards_ = torch::zeros({capacity_long});
+  terminals_ = torch::zeros({capacity_long}, torch::kBool);
+  truncations_ = torch::zeros({capacity_long}, torch::kBool);
   indices_ = 0;
 }
 

@@ -18,7 +18,7 @@ int main(int argc, char **argv) {
   ai::rollout::Rollout rollout(std::filesystem::path(path), 128, 10, 1000, 4);
   for (size_t i = 0; i < 1000; i++) {
     std::cout << "Rollout " << i + 1 << " of 1000" << std::endl;
-    rollout.rollout();
+    auto batch = rollout.rollout();
   }
   std::cout << "Success" << std::endl;
   return 0;

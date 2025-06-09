@@ -10,7 +10,7 @@ Rollout::Rollout(std::filesystem::path rom_path, size_t horizon,
         tmp_ale.loadROM(rom_path);
         auto screen = tmp_ale.getScreen();
         return ai::buffer::Buffer(
-            horizon, {frame_stack, screen.width(), screen.height()}, 1);
+            horizon, {frame_stack, screen.width(), screen.height()});
       }()),
       horizon_(horizon), num_episodes_(num_episodes), frame_stack_(frame_stack),
       max_steps_(max_steps), is_terminal_(true), is_truncated_(true) {
@@ -38,7 +38,7 @@ void Rollout::get_observation() {
   ale_.getScreenGrayscale(observation_);
 }
 
-void Rollout::rollout() {
+Batch Rollout::rollout() {
   for (size_t i = 0; i < horizon_; i++) {
     if (is_terminal_ || is_truncated_) {
       buffer_.add(observation_, -1, -1, is_terminal_, is_truncated_);
@@ -62,5 +62,7 @@ void Rollout::rollout() {
       current_episode_++;
     }
   }
+  return Batch{buffer_.observations_, buffer_.actions_, buffer_.rewards_,
+               buffer_.terminals_, buffer_.truncations_};
 }
 } // namespace ai::rollout

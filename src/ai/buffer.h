@@ -7,13 +7,7 @@ class Buffer {
 public:
   Buffer(int capacity, std::vector<size_t> observation_shape, int action_size);
 
-  void add(std::vector<unsigned char> state, int action, float reward) {
-    states_[indices_] =
-        torch::from_blob(state.data(), observation_shape_, torch::kByte);
-    actions_[indices_] = torch::tensor(action);
-    rewards_[indices_] = torch::tensor(reward);
-    indices_ = (indices_ + 1) % capacity_;
-  }
+  void add(std::vector<unsigned char> state, int action, float reward);
 
 private:
   int capacity_;

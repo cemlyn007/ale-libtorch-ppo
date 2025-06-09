@@ -8,7 +8,7 @@ Buffer::Buffer(int capacity, std::vector<size_t> observation_shape,
       std::vector<int64_t>(observation_shape.begin(), observation_shape.end());
   auto buffer_observation_shape = observation_shape_;
   buffer_observation_shape.insert(buffer_observation_shape.begin(), capacity_);
-  states_ = torch::zeros(buffer_observation_shape, torch::kByte);
+  observations_ = torch::zeros(buffer_observation_shape, torch::kByte);
   actions_ = torch::zeros({capacity_, action_size});
   rewards_ = torch::zeros({capacity_});
   terminals_ = torch::zeros({capacity_}, torch::kBool);
@@ -16,10 +16,10 @@ Buffer::Buffer(int capacity, std::vector<size_t> observation_shape,
   indices_ = 0;
 }
 
-void Buffer::add(std::vector<unsigned char> state, int action, float reward,
-                 bool terminal, bool truncation) {
-  states_[indices_] =
-      torch::from_blob(state.data(), observation_shape_, torch::kByte);
+void Buffer::add(std::vector<unsigned char> observation, int action,
+                 float reward, bool terminal, bool truncation) {
+  observations_[indices_] =
+      torch::from_blob(observation.data(), observation_shape_, torch::kByte);
   actions_[indices_] = torch::tensor(action);
   rewards_[indices_] = torch::tensor(reward);
   terminals_[indices_] = terminal;

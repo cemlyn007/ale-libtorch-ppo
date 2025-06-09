@@ -7,7 +7,8 @@ class Buffer {
 public:
   Buffer(int capacity, std::vector<size_t> observation_shape, int action_size);
 
-  void add(std::vector<unsigned char> state, int action, float reward);
+  void add(std::vector<unsigned char> state, int action, float reward,
+           bool terminal, bool truncation);
 
 private:
   int capacity_;
@@ -15,6 +16,9 @@ private:
   torch::Tensor states_;
   torch::Tensor actions_;
   torch::Tensor rewards_;
+  torch::Tensor terminals_;
+  torch::Tensor truncations_;
+
   int indices_;
 };
 

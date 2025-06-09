@@ -31,7 +31,7 @@ void Rollout::rollout() {
     while (!is_terminal_ && !is_truncated_) {
       auto action = select_action();
       auto reward = ale_.act(action);
-      buffer_.add(observation_, action, reward);
+      buffer_.add(observation_, action, reward, is_terminal_, is_truncated_);
       get_observation();
       is_terminal_ = ale_.game_over();
       is_truncated_ = is_terminal_ ? false : current_step_ >= max_steps_;

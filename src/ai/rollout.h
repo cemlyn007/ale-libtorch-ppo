@@ -1,6 +1,7 @@
 #include "ale/ale_interface.hpp"
 #include "buffer.h"
 #include <filesystem>
+#include <functional>
 #include <torch/torch.h>
 
 namespace ai::rollout {
@@ -16,7 +17,8 @@ struct Batch {
 class Rollout {
 public:
   Rollout(std::filesystem::path rom_path, size_t horizon, size_t num_episodes,
-          size_t max_steps, size_t frame_stack);
+          size_t max_steps, size_t frame_stack,
+          std::function<ale::Action(const torch::Tensor &)> action_selector);
   Batch rollout();
   ale::Action select_action();
   void get_reset_observation();
@@ -35,6 +37,7 @@ private:
   int current_step_ = 0;
   bool is_terminal_ = false;
   bool is_truncated_ = false;
+  std::function<ale::Action(const torch::Tensor &)> action_selector_;
 };
 
 } // namespace ai::rollout

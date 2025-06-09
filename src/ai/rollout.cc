@@ -3,8 +3,10 @@
 
 namespace ai::rollout {
 
-Rollout::Rollout(std::filesystem::path rom_path, size_t horizon,
-                 size_t num_episodes, size_t max_steps, size_t frame_stack)
+Rollout::Rollout(
+    std::filesystem::path rom_path, size_t horizon, size_t num_episodes,
+    size_t max_steps, size_t frame_stack,
+    std::function<ale::Action(const torch::Tensor &)> action_selector)
     : ale_(), rom_path_(rom_path), buffer_([&] {
         ale::ALEInterface tmp_ale;
         tmp_ale.loadROM(rom_path);
@@ -13,14 +15,20 @@ Rollout::Rollout(std::filesystem::path rom_path, size_t horizon,
             horizon, {frame_stack, screen.width(), screen.height()});
       }()),
       horizon_(horizon), num_episodes_(num_episodes), frame_stack_(frame_stack),
-      max_steps_(max_steps), is_terminal_(true), is_truncated_(true) {
+      max_steps_(max_steps), is_terminal_(true), is_truncated_(true),
+      action_selector_(action_selector) {
   ale_.loadROM(rom_path_);
   observation_.resize(frame_stack * ale_.getScreen().width() *
                       ale_.getScreen().height());
 }
 
 ale::Action Rollout::select_action() {
-  return ale_.getMinimalActionSet()[rand() % ale_.getMinimalActionSet().size()];
+  auto w = static_cast<int64_t>(ale_.getScreen().width());
+  auto h = static_cast<int64_t>(ale_.getScreen().height());
+  auto fs = static_cast<int64_t>(frame_stack_);
+  auto obs_tensor =
+      torch::from_blob(observation_.data(), {fs, w, h}, torch::kByte).clone();
+  return action_selector_(obs_tensor);
 }
 
 void Rollout::get_reset_observation() {

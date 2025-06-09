@@ -23,23 +23,18 @@ void Rollout::get_observation() { ale_.getScreenGrayscale(observation_); }
 
 void Rollout::rollout() {
   while (current_episode_ < num_episodes_) {
-    ale_.reset_game();
-
-    get_observation();
-
     current_step_ = 0;
-    is_done_ = false;
-    while (current_step_ < max_steps_ && !is_done_) {
+    is_terminal_ = false;
+    is_truncated_ = false;
+    ale_.reset_game();
+    get_observation();
+    while (!is_terminal_ && !is_truncated_) {
       auto action = select_action();
       auto reward = ale_.act(action);
-
       buffer_.add(observation_, action, reward);
-
       get_observation();
-      std::cout << "Episode: " << current_episode_
-                << ", Step: " << current_step_ << ", Action: " << action
-                << ", Reward: " << reward << std::endl;
-      is_done_ = ale_.game_over();
+      is_terminal_ = ale_.game_over();
+      is_truncated_ = is_terminal_ ? false : current_step_ >= max_steps_;
       current_step_++;
     }
     current_episode_++;

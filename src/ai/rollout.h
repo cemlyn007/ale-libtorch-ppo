@@ -21,7 +21,8 @@ private:
   int max_steps_;
   int current_episode_ = 0;
   int current_step_ = 0;
-  bool is_done_ = false;
+  bool is_terminal_ = false;
+  bool is_truncated_ = false;
 };
 
 } // namespace ai::rollout

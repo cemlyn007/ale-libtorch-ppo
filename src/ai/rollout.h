@@ -10,11 +10,13 @@ public:
           int max_steps);
   void rollout();
   ale::Action select_action();
+  void get_observation();
 
 private:
   ale::ALEInterface ale_;
   std::string rom_path_;
   ai::buffer::Buffer buffer_;
+  std::vector<unsigned char> observation_;
   int num_episodes_;
   int max_steps_;
   int current_episode_ = 0;

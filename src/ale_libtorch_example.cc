@@ -1,3 +1,4 @@
+#include "ai/rollout.h"
 #include <ale/ale_interface.hpp>
 #include <ale/version.hpp>
 #include <iostream>
@@ -13,13 +14,9 @@ int main(int argc, char **argv) {
     std::cout << "CUDA is not available! Training on CPU." << std::endl;
   }
   std::cout << tensor << std::endl;
-  ale::ALEInterface ale;
-  std::cout << "Initializing Arcade Learning Environment..." << std::endl;
-  ale.loadROM(path);
-  std::cout << "ALE initialized!" << std::endl;
-  std::cout << "Number of available actions: "
-            << ale.getMinimalActionSet().size() << std::endl;
-  ale.reset_game();
-  std::cout << "Game reset!" << std::endl;
+
+  ai::rollout::Rollout rollout(std::filesystem::path(path), 10, 1000);
+  rollout.rollout();
+  std::cout << "Success" << std::endl;
   return 0;
 }

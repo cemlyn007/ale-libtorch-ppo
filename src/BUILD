@@ -12,6 +12,7 @@ cc_binary(
     name = "ale_libtorch_example",
     srcs = ["ale_libtorch_example.cc"],
     deps = [
+        ":ai",
         "@arcade_learning_environment//:ale",
         "@libtorch//:torch",
     ],
@@ -24,5 +25,12 @@ cc_binary(
     ],
     deps = [
         "@libtorch//:torch",
+    ],
+)
+
+cc_library(
+    name = "ai",
+    deps = [
+        "//src/ai:rollout",
     ],
 )

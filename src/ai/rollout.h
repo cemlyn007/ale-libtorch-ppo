@@ -1,16 +1,20 @@
 #include "ale/ale_interface.hpp"
+#include "buffer.h"
 #include <filesystem>
 
 namespace ai::rollout {
 
 class Rollout {
 public:
-  Rollout(std::filesystem::path rom_path, int num_episodes, int max_steps);
+  Rollout(std::filesystem::path rom_path, size_t horizon, int num_episodes,
+          int max_steps);
   void rollout();
+  ale::Action select_action();
 
 private:
   ale::ALEInterface ale_;
   std::string rom_path_;
+  ai::buffer::Buffer buffer_;
   int num_episodes_;
   int max_steps_;
   int current_episode_ = 0;

@@ -31,6 +31,7 @@ cc_binary(
 cc_library(
     name = "ai",
     deps = [
+        "//src/ai:buffer",
         "//src/ai:rollout",
     ],
 )

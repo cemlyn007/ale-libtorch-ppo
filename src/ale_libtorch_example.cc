@@ -15,7 +15,7 @@ int main(int argc, char **argv) {
   }
   std::cout << tensor << std::endl;
 
-  ai::rollout::Rollout rollout(std::filesystem::path(path), 10, 1000);
+  ai::rollout::Rollout rollout(std::filesystem::path(path), 128, 10, 1000);
   rollout.rollout();
   std::cout << "Success" << std::endl;
   return 0;

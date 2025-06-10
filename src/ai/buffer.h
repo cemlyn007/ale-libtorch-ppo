@@ -9,14 +9,15 @@ public:
          size_t action_size);
 
   void add(std::vector<unsigned char> observation, int action, float reward,
-           bool terminal, bool truncation, torch::Tensor logits,
-           torch::Tensor value);
+           bool terminal, bool truncation, bool episode_start,
+           torch::Tensor logits, torch::Tensor value);
 
   torch::Tensor observations_;
   torch::Tensor actions_;
   torch::Tensor rewards_;
   torch::Tensor terminals_;
   torch::Tensor truncations_;
+  torch::Tensor episode_starts_;
   torch::Tensor logits_;
   torch::Tensor values_;
 

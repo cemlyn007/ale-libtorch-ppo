@@ -10,8 +10,11 @@ struct Batch {
   torch::Tensor observations;
   torch::Tensor actions;
   torch::Tensor rewards;
-  torch::Tensor terminals;
-  torch::Tensor truncations;
+  torch::Tensor masks;
+  torch::Tensor logits;
+  torch::Tensor values;
+  torch::Tensor advantages;
+  torch::Tensor returns;
 };
 
 struct ActionResult {
@@ -43,6 +46,7 @@ private:
   int current_step_ = 0;
   bool is_terminal_ = false;
   bool is_truncated_ = false;
+  bool is_episode_start_ = false;
   std::function<ActionResult(const torch::Tensor &)> action_selector_;
 };
 

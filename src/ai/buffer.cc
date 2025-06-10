@@ -14,6 +14,7 @@ Buffer::Buffer(size_t capacity, std::vector<size_t> observation_shape,
   rewards_ = torch::zeros({capacity_long});
   terminals_ = torch::zeros({capacity_long}, torch::kBool);
   truncations_ = torch::zeros({capacity_long}, torch::kBool);
+  episode_starts_ = torch::zeros({capacity_long}, torch::kBool);
   logits_ = torch::zeros({capacity_long, static_cast<int64_t>(action_size)});
   values_ = torch::zeros({capacity_long});
   indices_ = 0;
@@ -21,13 +22,15 @@ Buffer::Buffer(size_t capacity, std::vector<size_t> observation_shape,
 
 void Buffer::add(std::vector<unsigned char> observation, int action,
                  float reward, bool terminal, bool truncation,
-                 torch::Tensor logits, torch::Tensor value) {
+                 bool episode_start, torch::Tensor logits,
+                 torch::Tensor value) {
   observations_[indices_] =
       torch::from_blob(observation.data(), observation_shape_, torch::kByte);
   actions_[indices_] = torch::tensor(action);
   rewards_[indices_] = torch::tensor(reward);
   terminals_[indices_] = terminal;
   truncations_[indices_] = truncation;
+  episode_starts_[indices_] = episode_start;
   logits_[indices_] = logits;
   values_[indices_] = value;
   indices_ = (indices_ + 1) % capacity_;

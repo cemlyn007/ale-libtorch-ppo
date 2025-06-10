@@ -1,5 +1,6 @@
 #include "rollout.h"
 #include "algorithm"
+#include "gae.h"
 
 namespace ai::rollout {
 
@@ -52,17 +53,19 @@ Batch Rollout::rollout() {
   for (size_t i = 0; i < horizon_; i++) {
     if (is_terminal_ || is_truncated_) {
       buffer_.add(observation_, -1, -1, is_terminal_, is_truncated_,
-                  action_result.logits, action_result.value);
+                  is_episode_start_, action_result.logits, action_result.value);
       current_step_ = 0;
       is_terminal_ = false;
       is_truncated_ = false;
+      is_episode_start_ = false;
       ale_.reset_game();
       get_reset_observation();
     } else {
       action_result = select_action();
       auto reward = ale_.act(action_result.action);
       buffer_.add(observation_, action_result.action, reward, is_terminal_,
-                  is_truncated_, action_result.logits, action_result.value);
+                  is_episode_start_, is_truncated_, action_result.logits,
+                  action_result.value);
       get_observation();
       is_terminal_ = ale_.game_over(false);
       is_truncated_ =
@@ -71,10 +74,22 @@ Batch Rollout::rollout() {
       current_step_++;
     }
     if (is_terminal_ || is_truncated_) {
+      is_episode_start_ = true;
       current_episode_++;
     }
   }
-  return Batch{buffer_.observations_, buffer_.actions_, buffer_.rewards_,
-               buffer_.terminals_, buffer_.truncations_};
+  action_result = select_action();
+  auto advantages =
+      ai::gae::gae(buffer_.rewards_, buffer_.values_, action_result.value,
+                   buffer_.terminals_, buffer_.truncations_,
+                   buffer_.episode_starts_, 0.99, 0.95);
+  auto returns = advantages + buffer_.values_;
+  return Batch{buffer_.observations_,
+               buffer_.actions_,
+               buffer_.rewards_,
+               torch::logical_not(buffer_.episode_starts_),
+               buffer_.values_,
+               advantages,
+               returns};
 }
 } // namespace ai::rollout

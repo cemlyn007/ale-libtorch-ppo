@@ -47,25 +47,29 @@ TORCH_MODULE(Network);
 
 int main(int argc, char **argv) {
   auto path = argv[1];
-  torch::Tensor tensor = torch::eye(3);
+  torch::Device device(torch::kCPU);
   if (torch::cuda::is_available()) {
     std::cout << "CUDA is available! Training on GPU." << std::endl;
-    tensor = tensor.to(torch::kCUDA);
+    device = torch::Device(torch::kCUDA);
   } else {
     std::cout << "CUDA is not available! Training on CPU." << std::endl;
   }
-  std::cout << tensor << std::endl;
 
   Network network(128, 4);
+  network->to(device);
   torch::optim::Adam optimizer(network->parameters(),
                                torch::optim::AdamOptions(0.001));
 
-  auto action_selector = [&network](const torch::Tensor &obs) -> ale::Action {
+  auto action_selector = [&network,
+                          &device](const torch::Tensor &obs) -> ale::Action {
     torch::NoGradGuard no_grad;
-    auto output = network->forward(obs.unsqueeze(0));
+    auto observation = device.is_cuda() ? obs.to(torch::kFloat32) : obs;
+    auto output = network->forward(observation.to(device).unsqueeze(0));
     auto logits = output.logits;
-    auto action_idx = logits.argmax(-1).item<int>();
-    return static_cast<ale::Action>(action_idx);
+    auto probabilities = torch::nn::functional::softmax(
+        logits, torch::nn::functional::SoftmaxFuncOptions(-1));
+    auto action = torch::multinomial(probabilities, 1).item<int64_t>();
+    return static_cast<ale::Action>(action);
   };
 
   ai::rollout::Rollout rollout(std::filesystem::path(path), 128, 10, 1000, 4,

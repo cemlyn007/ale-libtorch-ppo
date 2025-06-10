@@ -14,13 +14,19 @@ struct Batch {
   torch::Tensor truncations;
 };
 
+struct ActionResult {
+  ale::Action action;
+  torch::Tensor logits;
+  torch::Tensor value;
+};
+
 class Rollout {
 public:
   Rollout(std::filesystem::path rom_path, size_t horizon, size_t num_episodes,
           size_t max_steps, size_t frame_stack,
-          std::function<ale::Action(const torch::Tensor &)> action_selector);
+          std::function<ActionResult(const torch::Tensor &)> action_selector);
   Batch rollout();
-  ale::Action select_action();
+  ActionResult select_action();
   void get_reset_observation();
   void get_observation();
 
@@ -37,7 +43,7 @@ private:
   int current_step_ = 0;
   bool is_terminal_ = false;
   bool is_truncated_ = false;
-  std::function<ale::Action(const torch::Tensor &)> action_selector_;
+  std::function<ActionResult(const torch::Tensor &)> action_selector_;
 };
 
 } // namespace ai::rollout

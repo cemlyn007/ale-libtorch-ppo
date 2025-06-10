@@ -60,8 +60,9 @@ int main(int argc, char **argv) {
   torch::optim::Adam optimizer(network->parameters(),
                                torch::optim::AdamOptions(0.001));
 
-  auto action_selector = [&network,
-                          &device](const torch::Tensor &obs) -> ale::Action {
+  auto action_selector =
+      [&network,
+       &device](const torch::Tensor &obs) -> ai::rollout::ActionResult {
     torch::NoGradGuard no_grad;
     auto observation = device.is_cuda() ? obs.to(torch::kFloat32) : obs;
     auto output = network->forward(observation.to(device).unsqueeze(0));
@@ -69,7 +70,8 @@ int main(int argc, char **argv) {
     auto probabilities = torch::nn::functional::softmax(
         logits, torch::nn::functional::SoftmaxFuncOptions(-1));
     auto action = torch::multinomial(probabilities, 1).item<int64_t>();
-    return static_cast<ale::Action>(action);
+    return {static_cast<ale::Action>(action), logits.squeeze(),
+            output.value.squeeze()};
   };
 
   ai::rollout::Rollout rollout(std::filesystem::path(path), 128, 10, 1000, 4,

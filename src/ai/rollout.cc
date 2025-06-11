@@ -52,7 +52,7 @@ Batch Rollout::rollout() {
   ActionResult action_result = select_action();
   for (size_t i = 0; i < horizon_; i++) {
     if (is_terminal_ || is_truncated_) {
-      buffer_.add(observation_, -1, -1, is_terminal_, is_truncated_,
+      buffer_.add(observation_, 0, 0, is_terminal_, is_truncated_,
                   is_episode_start_, action_result.logits, action_result.value);
       current_step_ = 0;
       is_terminal_ = false;
@@ -88,6 +88,7 @@ Batch Rollout::rollout() {
                buffer_.actions_,
                buffer_.rewards_,
                torch::logical_not(buffer_.episode_starts_),
+               buffer_.logits_,
                buffer_.values_,
                advantages,
                returns};

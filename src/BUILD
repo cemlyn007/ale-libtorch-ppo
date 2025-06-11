@@ -32,6 +32,7 @@ cc_library(
     name = "ai",
     deps = [
         "//src/ai:buffer",
+        "//src/ai:ppo",
         "//src/ai:rollout",
     ],
 )

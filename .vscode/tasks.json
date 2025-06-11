@@ -27,5 +27,22 @@
                 "isDefault": true
             }
         },
+        {
+            "command": "bazel",
+            "args": [
+                "run",
+                "--compilation_mode=opt",
+                "//src:ale_libtorch_example",
+                "--",
+                "${workspaceFolder}/roms/breakout.bin"
+            ],
+            "label": "run",
+            "type": "shell",
+            "group": {
+                "kind": "none",
+                "isDefault": true
+            },
+            "problemMatcher": []
+        }
     ]
 }

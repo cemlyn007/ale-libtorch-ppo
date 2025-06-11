@@ -10,7 +10,7 @@ Buffer::Buffer(size_t capacity, std::vector<size_t> observation_shape,
   buffer_observation_shape.insert(buffer_observation_shape.begin(), capacity_);
   observations_ = torch::zeros(buffer_observation_shape, torch::kByte);
   long capacity_long = static_cast<long>(capacity_);
-  actions_ = torch::zeros({capacity_long});
+  actions_ = torch::zeros({capacity_long}, torch::kLong);
   rewards_ = torch::zeros({capacity_long});
   terminals_ = torch::zeros({capacity_long}, torch::kBool);
   truncations_ = torch::zeros({capacity_long}, torch::kBool);

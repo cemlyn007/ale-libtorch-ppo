@@ -5,3 +5,7 @@ build --cxxopt='-Werror'
 
 # Test options
 test --test_output=errors
+
+# Debug build specific environment variables
+build:dbg --action_env=CUDA_LAUNCH_BLOCKING=1
+build:dbg --action_env=TORCH_USE_CUDA_DSA=1

@@ -1,3 +1,4 @@
+#include "ai/ppo.h"
 #include "ai/rollout.h"
 #include <ale/ale_interface.hpp>
 #include <ale/version.hpp>
@@ -28,6 +29,9 @@ struct NetworkImpl : torch::nn::Module {
   }
 
   ForwardResult forward(torch::Tensor x) {
+    if (x.device().is_cuda()) {
+      x = x.to(torch::kFloat32);
+    }
     x = torch::nn::functional::interpolate(
         x, torch::nn::functional::InterpolateFuncOptions()
                .size(std::vector<int64_t>({84, 84}))
@@ -45,6 +49,21 @@ struct NetworkImpl : torch::nn::Module {
 };
 TORCH_MODULE(Network);
 
+torch::Tensor
+compute_loss(Network &network, const torch::Tensor &observations,
+             const torch::Tensor &actions, const torch::Tensor &advantages,
+             const torch::Tensor &old_logits, const torch::Tensor &returns,
+             const torch::Tensor &masks, float clip_param = 0.2,
+             float value_loss_coef = 0.5, float entropy_coef = 0.01) {
+  // Compute the loss using the PPO loss function
+  auto output = network->forward(observations);
+  auto logits = output.logits;
+  auto values = output.value;
+  return ai::ppo::ppo_loss(logits, old_logits, actions, advantages, values,
+                           returns, masks, clip_param, value_loss_coef,
+                           entropy_coef);
+}
+
 int main(int argc, char **argv) {
   auto path = argv[1];
   torch::Device device(torch::kCPU);
@@ -59,27 +78,35 @@ int main(int argc, char **argv) {
   network->to(device);
   torch::optim::Adam optimizer(network->parameters(),
                                torch::optim::AdamOptions(0.001));
-
-  auto action_selector =
+  ai::rollout::Rollout rollout(
+      std::filesystem::path(path), 128, 10, 1000, 4,
       [&network,
        &device](const torch::Tensor &obs) -> ai::rollout::ActionResult {
-    torch::NoGradGuard no_grad;
-    auto observation = device.is_cuda() ? obs.to(torch::kFloat32) : obs;
-    auto output = network->forward(observation.to(device).unsqueeze(0));
-    auto logits = output.logits;
-    auto probabilities = torch::nn::functional::softmax(
-        logits, torch::nn::functional::SoftmaxFuncOptions(-1));
-    auto action = torch::multinomial(probabilities, 1).item<int64_t>();
-    return {static_cast<ale::Action>(action), logits.squeeze(),
-            output.value.squeeze()};
-  };
-
-  ai::rollout::Rollout rollout(std::filesystem::path(path), 128, 10, 1000, 4,
-                               action_selector);
+        torch::NoGradGuard no_grad;
+        auto observation = device.is_cuda() ? obs.to(torch::kFloat32) : obs;
+        auto output = network->forward(observation.to(device).unsqueeze(0));
+        auto logits = output.logits;
+        auto probabilities = torch::nn::functional::softmax(
+            logits, torch::nn::functional::SoftmaxFuncOptions(-1));
+        auto action = torch::multinomial(probabilities, 1).item<int64_t>();
+        return {static_cast<ale::Action>(action), logits.squeeze(),
+                output.value.squeeze()};
+      });
   for (size_t i = 0; i < 1000; i++) {
     std::cout << "Rollout " << i + 1 << " of 1000" << std::endl;
     auto batch = rollout.rollout();
+    auto observations = batch.observations.to(device);
+    auto actions = batch.actions.to(device);
+    auto advantages = batch.advantages.to(device);
+    auto logits = batch.logits.to(device);
+    auto returns = batch.returns.to(device);
+    auto masks = batch.masks.to(device);
+    auto loss = compute_loss(network, observations, actions, advantages, logits,
+                             returns, masks, 0.2, 0.5, 0.01);
     optimizer.zero_grad();
+    loss.backward();
+    optimizer.step();
+    std::cout << "Loss: " << loss.item<float>() << std::endl;
   }
   std::cout << "Success" << std::endl;
   return 0;

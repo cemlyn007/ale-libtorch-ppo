@@ -23,6 +23,15 @@ cc_library(
 )
 
 cc_library(
+    name = "ppo",
+    srcs = ["ppo.cc"],
+    hdrs = ["ppo.h"],
+    deps = [
+        "@libtorch//:torch",
+    ],
+)
+
+cc_library(
     name = "gae",
     srcs = ["gae.cc"],
     hdrs = ["gae.h"],

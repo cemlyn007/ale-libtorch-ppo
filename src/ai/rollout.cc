@@ -48,8 +48,11 @@ void Rollout::get_observation() {
   ale_.getScreenGrayscale(observation_);
 }
 
-Batch Rollout::rollout() {
+RolloutResult Rollout::rollout() {
   ActionResult action_result = select_action();
+  std::vector<float> episode_returns;
+  std::vector<size_t> episode_lengths;
+
   for (size_t i = 0; i < horizon_; i++) {
     if (is_terminal_ || is_truncated_) {
       buffer_.add(observation_, 0, 0, is_terminal_, is_truncated_,
@@ -63,6 +66,10 @@ Batch Rollout::rollout() {
     } else {
       action_result = select_action();
       auto reward = ale_.act(action_result.action);
+      current_episode_return_ += static_cast<float>(reward);
+      current_episode_length_++;
+      total_steps_++;
+
       buffer_.add(observation_, action_result.action, reward, is_terminal_,
                   is_episode_start_, is_truncated_, action_result.logits,
                   action_result.value);
@@ -76,21 +83,31 @@ Batch Rollout::rollout() {
     if (is_terminal_ || is_truncated_) {
       is_episode_start_ = true;
       current_episode_++;
+      episode_returns.push_back(current_episode_return_);
+      episode_lengths.push_back(current_episode_length_);
+      current_episode_return_ = 0.0f;
+      current_episode_length_ = 0;
     }
   }
+
   action_result = select_action();
   auto advantages =
       ai::gae::gae(buffer_.rewards_, buffer_.values_, action_result.value,
                    buffer_.terminals_, buffer_.truncations_,
                    buffer_.episode_starts_, 0.99, 0.95);
   auto returns = advantages + buffer_.values_;
-  return Batch{buffer_.observations_,
-               buffer_.actions_,
-               buffer_.rewards_,
-               torch::logical_not(buffer_.episode_starts_),
-               buffer_.logits_,
-               buffer_.values_,
-               advantages,
-               returns};
+
+  Batch batch{buffer_.observations_,
+              buffer_.actions_,
+              buffer_.rewards_,
+              torch::logical_not(buffer_.episode_starts_),
+              buffer_.logits_,
+              buffer_.values_,
+              advantages,
+              returns};
+
+  Log log{total_steps_, current_episode_, episode_returns, episode_lengths};
+
+  return {batch, log};
 }
 } // namespace ai::rollout

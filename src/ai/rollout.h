@@ -17,6 +17,18 @@ struct Batch {
   torch::Tensor returns;
 };
 
+struct Log {
+  size_t steps;
+  size_t episodes;
+  std::vector<float> episode_returns;
+  std::vector<size_t> episode_lengths;
+};
+
+struct RolloutResult {
+  Batch batch;
+  Log log;
+};
+
 struct ActionResult {
   ale::Action action;
   torch::Tensor logits;
@@ -28,7 +40,7 @@ public:
   Rollout(std::filesystem::path rom_path, size_t horizon, size_t num_episodes,
           size_t max_steps, size_t frame_stack,
           std::function<ActionResult(const torch::Tensor &)> action_selector);
-  Batch rollout();
+  RolloutResult rollout();
   ActionResult select_action();
   void get_reset_observation();
   void get_observation();
@@ -41,9 +53,12 @@ private:
   size_t horizon_;
   size_t num_episodes_;
   size_t frame_stack_;
-  int max_steps_;
-  int current_episode_ = 0;
-  int current_step_ = 0;
+  size_t max_steps_;
+  size_t current_episode_ = 0;
+  size_t current_step_ = 0;
+  size_t total_steps_ = 0;
+  float current_episode_return_ = 0.0f;
+  size_t current_episode_length_ = 0;
   bool is_terminal_ = false;
   bool is_truncated_ = false;
   bool is_episode_start_ = false;

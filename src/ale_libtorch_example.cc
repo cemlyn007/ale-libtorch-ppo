@@ -4,9 +4,9 @@
 #include <ale/ale_interface.hpp>
 #include <ale/version.hpp>
 #include <iostream>
+#include <numeric>
 #include <torch/nn.h>
 #include <torch/torch.h>
-
 struct ForwardResult {
   torch::Tensor logits;
   torch::Tensor value;
@@ -56,7 +56,6 @@ compute_loss(Network &network, const torch::Tensor &observations,
              const torch::Tensor &old_logits, const torch::Tensor &returns,
              const torch::Tensor &masks, float clip_param = 0.2,
              float value_loss_coef = 0.5, float entropy_coef = 0.01) {
-  // Compute the loss using the PPO loss function
   auto output = network->forward(observations);
   auto logits = output.logits;
   auto values = output.value;
@@ -95,9 +94,29 @@ int main(int argc, char **argv) {
         return {static_cast<ale::Action>(action), logits.squeeze(),
                 output.value.squeeze()};
       });
-  for (size_t i = 0; i < 1000; i++) {
-    std::cout << "Rollout " << i + 1 << " of 1000" << std::endl;
-    auto batch = rollout.rollout();
+
+  for (size_t i = 0; i < 100000; i++) {
+    std::cout << "Rollout " << i + 1 << " of 100000" << std::endl;
+    auto result = rollout.rollout();
+    auto batch = result.batch;
+    auto log = result.log;
+
+    // Display episode returns and lengths
+    if (!log.episode_returns.empty()) {
+      float avg_return = std::accumulate(log.episode_returns.begin(),
+                                         log.episode_returns.end(), 0.0f) /
+                         log.episode_returns.size();
+      float avg_length = std::accumulate(log.episode_lengths.begin(),
+                                         log.episode_lengths.end(), 0.0f) /
+                         log.episode_lengths.size();
+      // Log to tensorboard
+      logger.add_scalar("avg_return", log.steps, avg_return);
+      logger.add_scalar("avg_length", log.steps, avg_length);
+      logger.add_histogram("episode_returns", log.steps, log.episode_returns);
+      logger.add_histogram("episode_lengths", log.steps, log.episode_lengths);
+    }
+    std::cout << "=======================" << std::endl;
+
     auto observations = batch.observations.to(device);
     auto actions = batch.actions.to(device);
     auto advantages = batch.advantages.to(device);
@@ -111,7 +130,7 @@ int main(int argc, char **argv) {
     optimizer.step();
     auto loss_value = loss.item<float>();
     std::cout << "Loss: " << loss_value << std::endl;
-    logger.add_scalar("loss", i, loss_value);
+    logger.add_scalar("loss", log.steps, loss_value);
   }
   std::cout << "Success" << std::endl;
   return 0;

@@ -33,6 +33,12 @@ http_archive(
 
 bazel_dep(name = "platforms", version = "0.0.11")
 
+bazel_dep(name = "tensorboard_logger")
+local_path_override(
+    module_name = "tensorboard_logger",
+    path = "../tensorboard_logger",
+)
+
 libtorch_extension = use_extension("//third_party:libtorch.bzl", "libtorch_configure_extension")
 libtorch_extension.configure(
     version = "2.4.1",  # Specify your desired version here
@@ -44,6 +50,6 @@ use_repo(libtorch_extension, "libtorch")
 bazel_dep(name = "hedron_compile_commands", dev_dependency = True)
 git_override(
     module_name = "hedron_compile_commands",
-    commit = "4f28899228fb3ad0126897876f147ca15026151e",
-    remote = "https://github.com/hedronvision/bazel-compile-commands-extractor.git",
+    remote = "https://github.com/mikael-s-persson/bazel-compile-commands-extractor",
+    commit = "f5fbd4cee671d8d908f37c83abaf70fba5928fc7",
 )

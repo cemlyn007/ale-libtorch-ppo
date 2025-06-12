@@ -15,6 +15,7 @@ cc_binary(
         ":ai",
         "@arcade_learning_environment//:ale",
         "@libtorch//:torch",
+        "@tensorboard_logger",
     ],
 )
 

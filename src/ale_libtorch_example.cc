@@ -1,5 +1,6 @@
 #include "ai/ppo.h"
 #include "ai/rollout.h"
+#include "tensorboard_logger.h"
 #include <ale/ale_interface.hpp>
 #include <ale/version.hpp>
 #include <iostream>
@@ -66,6 +67,7 @@ compute_loss(Network &network, const torch::Tensor &observations,
 
 int main(int argc, char **argv) {
   auto path = argv[1];
+  auto logger_path = argv[2];
   torch::Device device(torch::kCPU);
   if (torch::cuda::is_available()) {
     std::cout << "CUDA is available! Training on GPU." << std::endl;
@@ -74,6 +76,7 @@ int main(int argc, char **argv) {
     std::cout << "CUDA is not available! Training on CPU." << std::endl;
   }
 
+  TensorBoardLogger logger(logger_path);
   Network network(128, 4);
   network->to(device);
   torch::optim::Adam optimizer(network->parameters(),
@@ -106,7 +109,9 @@ int main(int argc, char **argv) {
     optimizer.zero_grad();
     loss.backward();
     optimizer.step();
-    std::cout << "Loss: " << loss.item<float>() << std::endl;
+    auto loss_value = loss.item<float>();
+    std::cout << "Loss: " << loss_value << std::endl;
+    logger.add_scalar("loss", i, loss_value);
   }
   std::cout << "Success" << std::endl;
   return 0;

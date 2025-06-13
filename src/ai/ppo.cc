@@ -1,12 +1,11 @@
 #include "ppo.h"
 
 namespace ai::ppo {
-torch::Tensor
-ppo_loss(const torch::Tensor &logits, const torch::Tensor &old_logits,
-         const torch::Tensor &actions, const torch::Tensor &advantages,
-         const torch::Tensor &values, const torch::Tensor &returns,
-         const torch::Tensor &masks, float clip_param, float value_loss_coef,
-         float entropy_coef) {
+Losses ppo_loss(const torch::Tensor &logits, const torch::Tensor &old_logits,
+                const torch::Tensor &actions, const torch::Tensor &advantages,
+                const torch::Tensor &values, const torch::Tensor &returns,
+                const torch::Tensor &masks, float clip_param,
+                float value_loss_coef, float entropy_coef) {
   auto log_probabilities = torch::log_softmax(logits, -1);
   auto log_old_probabilities = torch::log_softmax(old_logits, -1);
   auto action_indices = actions.unsqueeze(-1);
@@ -21,9 +20,14 @@ ppo_loss(const torch::Tensor &logits, const torch::Tensor &old_logits,
 
   auto entropies =
       -torch::sum(torch::softmax(logits, -1) * log_probabilities, -1);
-  auto total_losses = clipped_losses + value_loss_coef * value_losses -
+  auto total_losses = -clipped_losses + value_loss_coef * value_losses -
                       entropy_coef * entropies;
-  return torch::where(masks, total_losses, 0.0).sum() / masks.sum();
+  return {torch::where(masks, total_losses, 0.0).sum() / masks.sum(),
+          clipped_losses,
+          value_losses,
+          entropies,
+          total_losses,
+          masks};
 }
 
 } // namespace ai::ppo

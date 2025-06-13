@@ -37,8 +37,8 @@ struct ActionResult {
 
 class Rollout {
 public:
-  Rollout(std::filesystem::path rom_path, size_t horizon, size_t num_episodes,
-          size_t max_steps, size_t frame_stack,
+  Rollout(std::filesystem::path rom_path, size_t horizon, size_t max_steps,
+          size_t frame_stack,
           std::function<ActionResult(const torch::Tensor &)> action_selector);
   RolloutResult rollout();
   ActionResult select_action();
@@ -51,7 +51,6 @@ private:
   ai::buffer::Buffer buffer_;
   std::vector<unsigned char> observation_;
   size_t horizon_;
-  size_t num_episodes_;
   size_t frame_stack_;
   size_t max_steps_;
   size_t current_episode_ = 0;

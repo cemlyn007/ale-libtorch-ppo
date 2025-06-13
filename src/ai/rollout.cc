@@ -5,8 +5,8 @@
 namespace ai::rollout {
 
 Rollout::Rollout(
-    std::filesystem::path rom_path, size_t horizon, size_t num_episodes,
-    size_t max_steps, size_t frame_stack,
+    std::filesystem::path rom_path, size_t horizon, size_t max_steps,
+    size_t frame_stack,
     std::function<ActionResult(const torch::Tensor &)> action_selector)
     : ale_(), rom_path_(rom_path), buffer_([&] {
         ale::ALEInterface ale;
@@ -16,8 +16,8 @@ Rollout::Rollout(
             horizon, {frame_stack, screen.width(), screen.height()},
             ale.getMinimalActionSet().size());
       }()),
-      horizon_(horizon), num_episodes_(num_episodes), frame_stack_(frame_stack),
-      max_steps_(max_steps), is_terminal_(true), is_truncated_(true),
+      horizon_(horizon), frame_stack_(frame_stack), max_steps_(max_steps),
+      is_terminal_(true), is_truncated_(true),
       action_selector_(action_selector) {
   ale_.loadROM(rom_path_);
   observation_.resize(frame_stack * ale_.getScreen().width() *

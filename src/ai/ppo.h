@@ -6,7 +6,7 @@ struct Metrics {
   torch::Tensor loss;
   torch::Tensor clipped_losses;
   torch::Tensor value_losses;
-  torch::Tensor entropy_losses;
+  torch::Tensor entropies;
   torch::Tensor total_losses;
   torch::Tensor ratio;
   torch::Tensor masks;

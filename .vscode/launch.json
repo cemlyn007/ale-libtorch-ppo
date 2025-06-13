@@ -11,6 +11,7 @@
             "program": "${workspaceFolder}/bazel-bin/src/ale_libtorch_example",
             "args": [
                 "${workspaceFolder}/roms/breakout.bin",
+                "${workspaceFolder}/logs/ppo/tfevents.out.tfevents",
             ],
             "stopAtEntry": false,
             "cwd": "${workspaceFolder}",

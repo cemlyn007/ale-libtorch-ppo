@@ -34,7 +34,8 @@
                 "--compilation_mode=opt",
                 "//src:ale_libtorch_example",
                 "--",
-                "${workspaceFolder}/roms/breakout.bin"
+                "${workspaceFolder}/roms/breakout.bin",
+                "${workspaceFolder}/logs/ppo/tfevents.out.tfevents",
             ],
             "label": "run",
             "type": "shell",

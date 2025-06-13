@@ -1,11 +1,11 @@
 #include "ppo.h"
 
 namespace ai::ppo {
-Losses ppo_loss(const torch::Tensor &logits, const torch::Tensor &old_logits,
-                const torch::Tensor &actions, const torch::Tensor &advantages,
-                const torch::Tensor &values, const torch::Tensor &returns,
-                const torch::Tensor &masks, float clip_param,
-                float value_loss_coef, float entropy_coef) {
+Metrics ppo_loss(const torch::Tensor &logits, const torch::Tensor &old_logits,
+                 const torch::Tensor &actions, const torch::Tensor &advantages,
+                 const torch::Tensor &values, const torch::Tensor &returns,
+                 const torch::Tensor &masks, float clip_param,
+                 float value_loss_coef, float entropy_coef) {
   auto log_probabilities = torch::log_softmax(logits, -1);
   auto log_old_probabilities = torch::log_softmax(old_logits, -1);
   auto action_indices = actions.unsqueeze(-1);
@@ -27,6 +27,7 @@ Losses ppo_loss(const torch::Tensor &logits, const torch::Tensor &old_logits,
           value_losses,
           entropies,
           total_losses,
+          ratio,
           masks};
 }
 

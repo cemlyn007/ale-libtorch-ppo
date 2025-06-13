@@ -63,7 +63,7 @@ std::vector<float> gather(const torch::Tensor &tensor,
   return std::vector<float>(data_ptr, data_ptr + t.numel());
 }
 
-ai::ppo::Losses
+ai::ppo::Metrics
 compute_loss(Network &network, const torch::Tensor &observations,
              const torch::Tensor &actions, const torch::Tensor &advantages,
              const torch::Tensor &old_logits, const torch::Tensor &returns,
@@ -143,28 +143,30 @@ int main(int argc, char **argv) {
     auto logits = batch.logits.to(device);
     auto returns = batch.returns.to(device);
     auto masks = batch.masks.to(device);
-    auto losses = compute_loss(network, observations, actions, advantages,
-                               logits, returns, masks, 0.2, 0.5, 0.01);
+    auto metrics = compute_loss(network, observations, actions, advantages,
+                                logits, returns, masks, 0.2, 0.5, 0.01);
     optimizer.zero_grad();
-    losses.loss.backward();
+    metrics.loss.backward();
     optimizer.step();
-    auto loss_value = losses.loss.item<float>();
-    logger.add_scalar("mean_loss", log.steps, loss_value);
+
+    logger.add_scalar("mean_loss", log.steps, metrics.loss.item<float>());
     logger.add_scalar("mean_clipped_loss", log.steps,
-                      mean(losses.clipped_losses, masks));
+                      mean(metrics.clipped_losses, masks));
     logger.add_scalar("mean_value_loss", log.steps,
-                      mean(losses.value_losses, masks));
+                      mean(metrics.value_losses, masks));
     logger.add_scalar("mean_entropy_loss", log.steps,
-                      mean(losses.entropy_losses, masks));
+                      mean(metrics.entropy_losses, masks));
+    logger.add_scalar("mean_ratio", log.steps, mean(metrics.ratio, masks));
     // Histogram
     logger.add_histogram("losses", log.steps,
-                         gather(losses.total_losses, masks));
+                         gather(metrics.total_losses, masks));
     logger.add_histogram("clipped_losses", log.steps,
-                         gather(losses.clipped_losses, masks));
+                         gather(metrics.clipped_losses, masks));
     logger.add_histogram("value_losses", log.steps,
-                         gather(losses.value_losses, masks));
+                         gather(metrics.value_losses, masks));
     logger.add_histogram("entropy_losses", log.steps,
-                         gather(losses.entropy_losses, masks));
+                         gather(metrics.entropy_losses, masks));
+    logger.add_histogram("ratios", log.steps, gather(metrics.ratio, masks));
     logger.add_histogram("advantages", log.steps, gather(advantages, masks));
     logger.add_histogram("returns", log.steps, gather(returns, masks));
   }

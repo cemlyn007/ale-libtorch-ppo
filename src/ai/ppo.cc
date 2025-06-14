@@ -11,8 +11,8 @@ Metrics ppo_loss(const torch::Tensor &logits, const torch::Tensor &old_logits,
   auto action_indices = actions.unsqueeze(-1);
 
   auto ratio =
-      torch::exp(log_probabilities.gather(1, action_indices).squeeze(-1) -
-                 log_old_probabilities.gather(1, action_indices).squeeze(-1));
+      torch::exp(log_probabilities.gather(-1, action_indices).squeeze(-1) -
+                 log_old_probabilities.gather(-1, action_indices).squeeze(-1));
   auto unclipped_losses = ratio * advantages;
   auto clamped_losses =
       torch::clamp(ratio, 1.0 - clip_param, 1.0 + clip_param) * advantages;
@@ -20,7 +20,7 @@ Metrics ppo_loss(const torch::Tensor &logits, const torch::Tensor &old_logits,
   auto value_losses = 0.5 * torch::square(values - returns);
 
   auto entropies =
-      -torch::sum(torch::softmax(logits, -1) * log_probabilities, -1);
+      -torch::sum(torch::exp(log_probabilities) * log_probabilities, -1);
 
   auto total_losses = clipped_losses + value_loss_coef * value_losses -
                       entropy_coef * entropies;

@@ -39,11 +39,15 @@ class Rollout {
 public:
   Rollout(std::filesystem::path rom_path, size_t horizon, size_t max_steps,
           size_t frame_stack,
-          std::function<ActionResult(const torch::Tensor &)> action_selector);
+          std::function<ActionResult(const torch::Tensor &)> action_selector,
+          float gae_gamma, float gae_lambda);
   RolloutResult rollout();
   ActionResult select_action();
   void get_reset_observation();
   void get_observation();
+
+  float gae_gamma_ = 0.99f;
+  float gae_lambda_ = 0.95f;
 
 private:
   ale::ALEInterface ale_;

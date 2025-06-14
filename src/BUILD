@@ -11,10 +11,16 @@ cc_binary(
 cc_binary(
     name = "ale_libtorch_example",
     srcs = ["ale_libtorch_example.cc"],
+    copts = [
+        "-DSTB_IMAGE_IMPLEMENTATION",
+        "-DSTB_IMAGE_WRITE_IMPLEMENTATION",
+    ],
     deps = [
         ":ai",
         "@arcade_learning_environment//:ale",
         "@libtorch//:torch",
+        "@stb//:stb_image",
+        "@stb//:stb_image_write",
         "@tensorboard_logger",
     ],
 )

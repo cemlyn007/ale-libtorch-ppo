@@ -30,7 +30,7 @@ struct RolloutResult {
 };
 
 struct ActionResult {
-  ale::Action action;
+  torch::Tensor action;
   torch::Tensor logits;
   torch::Tensor value;
 };

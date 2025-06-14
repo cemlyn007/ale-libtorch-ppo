@@ -1,5 +1,7 @@
 #include "ai/ppo.h"
 #include "ai/rollout.h"
+#include "stb_image.h"
+#include "stb_image_write.h"
 #include "tensorboard_logger.h"
 #include <ale/ale_interface.hpp>
 #include <ale/version.hpp>
@@ -24,6 +26,8 @@ struct Config {
   float gae_gamma = 0.99f;   // Discount factor for rewards
   float gae_lambda = 0.95f;  // GAE lambda for advantage estimation
   float max_gradient_norm = 0.5f; // Maximum norm for gradient clipping
+  size_t num_rollouts = 1000000;
+  bool log_images = false;
 };
 
 static const Config config = Config();
@@ -54,12 +58,19 @@ struct NetworkImpl : torch::nn::Module {
     if (x.device().is_cuda()) {
       x = x.to(torch::kFloat32);
     }
-    x = torch::nn::functional::interpolate(
-        x, torch::nn::functional::InterpolateFuncOptions()
-               .size(std::vector<int64_t>({84, 84}))
-               .mode(torch::kBilinear)
-               .align_corners(false));
-    x = x.to(torch::kFloat32) / 255.0;
+    {
+      torch::NoGradGuard no_grad;
+      auto batch_size = x.size(0);
+      auto frame_stack = x.size(1);
+      x = x.reshape({x.size(0) * x.size(1), 1, x.size(2), x.size(3)});
+      x = torch::nn::functional::interpolate(
+          x, torch::nn::functional::InterpolateFuncOptions()
+                 .size(std::vector<int64_t>({84, 84}))
+                 .mode(torch::kBilinear)
+                 .align_corners(false));
+      x = x.reshape({batch_size, frame_stack, 84, 84});
+      x = x.to(torch::kFloat32) / 255.0;
+    }
     x = sequential->forward(x);
     auto logits = action_head->forward(x);
     auto value = value_head->forward(x).squeeze(-1);
@@ -82,6 +93,28 @@ std::vector<float> gather(const torch::Tensor &tensor,
       tensor.masked_select(mask).contiguous().to(torch::kCPU, torch::kFloat);
   float *data_ptr = t.data_ptr<float>();
   return std::vector<float>(data_ptr, data_ptr + t.numel());
+}
+
+std::vector<float> to_vector(const torch::Tensor &tensor) {
+  auto t = tensor.contiguous().to(torch::kCPU, torch::kFloat);
+  float *data_ptr = t.data_ptr<float>();
+  return std::vector<float>(data_ptr, data_ptr + t.numel());
+}
+
+void initialize_weights(torch::nn::Module &module) {
+  for (auto &submodule : module.children()) {
+    if (auto linear = dynamic_cast<torch::nn::LinearImpl *>(submodule.get())) {
+
+      linear->weight.data().normal_(
+          0.0, 1.0 / std::sqrt(linear->options.in_features()));
+      if (linear->bias.defined()) {
+        linear->bias.data().fill_(1.0 /
+                                  std::sqrt(linear->options.in_features()));
+      }
+    } else {
+      initialize_weights(*submodule);
+    }
+  }
 }
 
 ai::ppo::Metrics
@@ -118,30 +151,32 @@ int main(int argc, char **argv) {
       logger_path.replace_extension("tfevents." + std::to_string(timestamp));
 
   TensorBoardLogger logger(logger_path);
-  Network network(128, 4);
+  int64_t action_size = 4;
+  Network network(config.hidden_size, action_size);
+  initialize_weights(*network);
   network->to(device);
   torch::optim::Adam optimizer(network->parameters(),
                                torch::optim::AdamOptions(config.learning_rate));
   ai::rollout::Rollout rollout(
       std::filesystem::path(path), config.horizon, config.max_steps,
       config.frame_stack,
-      [&network,
-       &device](const torch::Tensor &obs) -> ai::rollout::ActionResult {
+      [&network, &device,
+       &action_size](const torch::Tensor &obs) -> ai::rollout::ActionResult {
         torch::NoGradGuard no_grad;
         auto observation = device.is_cuda() ? obs.to(torch::kFloat32) : obs;
         auto output = network->forward(observation.to(device).unsqueeze(0));
         auto logits = output.logits;
         auto probabilities = torch::nn::functional::softmax(
             logits, torch::nn::functional::SoftmaxFuncOptions(-1));
-        auto action =
-            torch::multinomial(probabilities, 1, true).item<int64_t>();
-        return {static_cast<ale::Action>(action), logits.squeeze(),
-                output.value.squeeze()};
+        auto action = torch::multinomial(probabilities, 1, true);
+        return {action.reshape({}), logits.reshape({action_size}),
+                output.value.reshape({})};
       },
       config.gae_gamma, config.gae_lambda);
 
-  for (size_t i = 0; i < 10000000; i++) {
-    std::cout << "Rollout " << i + 1 << " of 10000000" << std::endl;
+  for (size_t i = 0; i < config.num_rollouts; i++) {
+    std::cout << "Rollout " << i + 1 << " of " << config.num_rollouts
+              << std::endl;
     auto result = rollout.rollout();
     auto batch = result.batch;
     auto log = result.log;
@@ -173,6 +208,9 @@ int main(int argc, char **argv) {
       throw std::runtime_error(
           "Batch size is not divisible by mini-batch size");
     }
+
+    auto clipped_gradients =
+        torch::empty({config.num_epochs, config.num_mini_batches});
 
     auto metric_loss = torch::empty(
         {config.num_epochs, config.num_mini_batches, config.mini_batch_size},
@@ -230,10 +268,11 @@ int main(int argc, char **argv) {
 
         optimizer.zero_grad();
         metrics.loss.backward();
-        torch::nn::utils::clip_grad_norm_(network->parameters(),
-                                          config.max_gradient_norm, 2.0, true);
+        auto clipped_gradient = torch::nn::utils::clip_grad_norm_(
+            network->parameters(), config.max_gradient_norm, 2.0, true);
         optimizer.step();
 
+        clipped_gradients.index_put_({{j, k}}, clipped_gradient);
         metric_loss.index_put_({{j, k}}, metrics.loss.reshape({1}));
         metric_clipped_losses.index_put_({{j, k}}, metrics.clipped_losses);
         metric_value_losses.index_put_({{j, k}}, metrics.value_losses);
@@ -246,6 +285,8 @@ int main(int argc, char **argv) {
       }
     }
 
+    logger.add_scalar("mean_clipped_gradient", log.steps,
+                      clipped_gradients.mean().item<float>());
     logger.add_scalar("mean_loss", log.steps, metric_loss.mean().item<float>());
     logger.add_scalar("mean_clipped_loss", log.steps,
                       mean(metric_clipped_losses, metric_masks));
@@ -256,6 +297,15 @@ int main(int argc, char **argv) {
     logger.add_scalar("mean_ratio", log.steps,
                       mean(metric_ratio, metric_masks));
     // Histogram
+    logger.add_histogram("actions", log.steps,
+                         gather(batch_actions, batch_masks));
+    logger.add_histogram(
+        "probabilities", log.steps,
+        gather(torch::nn::functional::softmax(
+                   batch_logits, torch::nn::functional::SoftmaxFuncOptions(-1)),
+               batch_masks.unsqueeze(1)));
+    logger.add_histogram("clipped_gradients", log.steps,
+                         to_vector(clipped_gradients));
     logger.add_histogram("losses", log.steps,
                          gather(metric_total_losses, metric_masks));
     logger.add_histogram("clipped_losses", log.steps,
@@ -270,6 +320,26 @@ int main(int argc, char **argv) {
                          gather(metric_advantages, metric_masks));
     logger.add_histogram("returns", log.steps,
                          gather(metric_returns, metric_masks));
+
+    if (config.log_images) {
+      for (int64_t index = 0; index < batch_observations.size(0); ++index) {
+        auto observation = batch_observations.index({index, 0}).to(torch::kCPU);
+        auto numel = observation.numel();
+        std::vector<unsigned char> img_data(numel);
+        std::memcpy(img_data.data(), observation.data_ptr<uint8_t>(),
+                    numel * sizeof(uint8_t));
+        int width = 160, height = 210, channels = 1;
+        std::string png_data;
+        auto write_func = [](void *context, void *data, int size) {
+          auto *str = static_cast<std::string *>(context);
+          str->append(static_cast<char *>(data), size);
+        };
+        stbi_write_png_to_func(write_func, &png_data, width, height, channels,
+                               img_data.data(), width * channels);
+        logger.add_image("observation", log.steps - config.horizon + index,
+                         png_data, 210, 160, 1);
+      }
+    }
   }
   std::cout << "Success" << std::endl;
   return 0;

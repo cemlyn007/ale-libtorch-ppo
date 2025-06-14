@@ -58,15 +58,17 @@ RolloutResult Rollout::rollout() {
 
   for (size_t i = 0; i < horizon_; i++) {
     if (is_episode_start_) {
-      buffer_.add(observation_, 0, 0, is_terminal_, is_truncated_,
-                  is_episode_start_, action_result.logits, action_result.value);
+      buffer_.add(observation_, action_result.action, 0, is_terminal_,
+                  is_truncated_, is_episode_start_, action_result.logits,
+                  action_result.value);
       current_step_ = 0;
       is_episode_start_ = false;
       ale_.reset_game();
       get_reset_observation();
     } else {
       action_result = select_action();
-      auto reward = ale_.act(action_result.action);
+      auto reward = ale_.act(
+          ale_.getMinimalActionSet()[action_result.action.item<int64_t>()]);
       is_terminal_ = ale_.game_over(false);
       is_truncated_ =
           is_terminal_ ? false

@@ -20,13 +20,14 @@ Buffer::Buffer(size_t capacity, std::vector<size_t> observation_shape,
   indices_ = 0;
 }
 
-void Buffer::add(std::vector<unsigned char> observation, int action,
-                 float reward, bool terminal, bool truncation,
-                 bool episode_start, torch::Tensor logits,
-                 torch::Tensor value) {
+void Buffer::add(const std::vector<unsigned char> &observation,
+                 const torch::Tensor &action, float reward, bool terminal,
+                 bool truncation, bool episode_start,
+                 const torch::Tensor &logits, const torch::Tensor &value) {
   observations_[indices_] =
-      torch::from_blob(observation.data(), observation_shape_, torch::kByte);
-  actions_[indices_] = torch::tensor(action);
+      torch::from_blob(const_cast<unsigned char *>(observation.data()),
+                       observation_shape_, torch::kByte);
+  actions_[indices_] = action;
   rewards_[indices_] = torch::tensor(reward);
   terminals_[indices_] = terminal;
   truncations_[indices_] = truncation;

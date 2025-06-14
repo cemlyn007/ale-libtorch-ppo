@@ -53,3 +53,5 @@ git_override(
     remote = "https://github.com/mikael-s-persson/bazel-compile-commands-extractor",
     commit = "f5fbd4cee671d8d908f37c83abaf70fba5928fc7",
 )
+
+bazel_dep(name = "stb", version = "0.0.0-20241109-5c20573")

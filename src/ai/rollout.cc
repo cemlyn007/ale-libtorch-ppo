@@ -103,7 +103,8 @@ RolloutResult Rollout::rollout() {
       } else {
         auto ale_action_set = ales_[ale_index]->getMinimalActionSet();
         int64_t action_index = action_result.actions[ale_index].item<int64_t>();
-        if (action_index < 0 || action_index >= ale_action_set.size()) {
+        if (action_index < 0 ||
+            action_index >= static_cast<int64_t>(ale_action_set.size())) {
           throw std::out_of_range("Action index out of range for environment " +
                                   std::to_string(ale_index));
         }

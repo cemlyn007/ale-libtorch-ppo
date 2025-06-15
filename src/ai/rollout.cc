@@ -1,106 +1,160 @@
 #include "rollout.h"
-#include "algorithm"
 #include "gae.h"
 
 namespace ai::rollout {
 
 Rollout::Rollout(
-    std::filesystem::path rom_path, size_t horizon, size_t max_steps,
-    size_t frame_stack,
+    std::filesystem::path rom_path, size_t total_environments, size_t horizon,
+    size_t max_steps, size_t frame_stack,
     std::function<ActionResult(const torch::Tensor &)> action_selector,
     float gae_gamma, float gae_lambda)
-    : gae_gamma_(gae_gamma), gae_lambda_(gae_lambda), ale_(),
+    : gae_gamma_(gae_gamma), gae_lambda_(gae_lambda), ales_(),
       rom_path_(rom_path), buffer_([&] {
         ale::ALEInterface ale;
         ale.loadROM(rom_path);
         auto screen = ale.getScreen();
         return ai::buffer::Buffer(
-            horizon, {frame_stack, screen.width(), screen.height()},
+            total_environments, horizon,
+            {frame_stack, screen.width(), screen.height()},
             ale.getMinimalActionSet().size());
       }()),
-      horizon_(horizon), frame_stack_(frame_stack), max_steps_(max_steps),
-      is_terminal_(true), is_truncated_(true), is_episode_start_(true),
-      action_selector_(action_selector) {
-  ale_.loadROM(rom_path_);
-  ale_.setBool("truncate_on_loss_of_life", true);
-  observation_.resize(frame_stack * ale_.getScreen().width() *
-                      ale_.getScreen().height());
+      total_environments_(total_environments), horizon_(horizon),
+      frame_stack_(frame_stack), max_steps_(max_steps), is_terminal_(),
+      is_truncated_(), is_episode_start_(), action_selector_(action_selector) {
+
+  // TODO: Initialize vectors etc
+  if (total_environments_ == 0) {
+    throw std::invalid_argument("Total environments must be greater than 0.");
+  }
+  if (horizon_ == 0) {
+    throw std::invalid_argument("Horizon must be greater than 0.");
+  }
+  if (max_steps_ == 0) {
+    throw std::invalid_argument("Max steps must be greater than 0.");
+  }
+  if (frame_stack_ == 0) {
+    throw std::invalid_argument("Frame stack must be greater than 0.");
+  }
+  if (rom_path_.empty()) {
+    throw std::invalid_argument("ROM path must not be empty.");
+  }
+  if (!std::filesystem::exists(rom_path_)) {
+    throw std::invalid_argument("ROM file does not exist: " + rom_path_);
+  }
+
+  for (int64_t i = 0; i < total_environments_; i++) {
+    ales_.push_back(std::make_unique<ale::ALEInterface>());
+    ales_.back()->loadROM(rom_path_);
+    ales_.back()->setBool("truncate_on_loss_of_life", true);
+    ales_.back()->setInt("max_num_frames_per_episode", 108000);
+    ales_.back()->setInt("frame_skip", 1);
+    ales_.back()->setInt("reward_min", -1);
+    ales_.back()->setInt("reward_max", 1);
+    ales_.back()->setInt("random_seed", i);
+    ales_.back()->setFloat("repeat_action_probability", 0.0f);
+    screen_width_ = ales_.back()->getScreen().width();
+    screen_height_ = ales_.back()->getScreen().height();
+  }
+
+  observations_ = torch::zeros(
+      {total_environments_, frame_stack_, screen_width_, screen_height_},
+      torch::kByte);
+  is_terminal_ = torch::zeros({total_environments_}, torch::kBool);
+  is_truncated_ = torch::zeros({total_environments_}, torch::kBool);
+  is_episode_start_ = torch::ones({total_environments_}, torch::kBool);
+  rewards_ = torch::zeros({total_environments_}, torch::kFloat32);
+  episode_returns_.resize(total_environments_, 0.0f);
+  episode_lengths_.resize(total_environments_, 0);
 }
 
-ActionResult Rollout::select_action() {
-  auto w = static_cast<int64_t>(ale_.getScreen().width());
-  auto h = static_cast<int64_t>(ale_.getScreen().height());
-  auto fs = static_cast<int64_t>(frame_stack_);
-  auto observation =
-      torch::from_blob(observation_.data(), {fs, w, h}, torch::kByte).clone();
-  return action_selector_(observation);
-}
-
-void Rollout::get_reset_observation() {
-  ale_.getScreenGrayscale(observation_);
-  for (size_t i = 1; i < frame_stack_; i++)
-    std::copy(observation_.begin(), observation_.end(),
-              observation_.begin() +
-                  i * ale_.getScreen().width() * ale_.getScreen().height());
-}
-
-void Rollout::get_observation() {
-  std::shift_right(observation_.begin(), observation_.end(),
-                   (frame_stack_ - 1) * ale_.getScreen().width() *
-                       ale_.getScreen().height());
-  ale_.getScreenGrayscale(observation_);
+void Rollout::get_observations() {
+  for (int64_t frame_index = frame_stack_ - 1; frame_index > 0; --frame_index) {
+    observations_.index_put_(
+        {torch::indexing::Slice(), frame_index},
+        observations_.index({torch::indexing::Slice(), frame_index - 1}));
+  }
+  std::vector<unsigned char> gray_scale(screen_width_ * screen_height_);
+  for (int64_t environment_index = 0; environment_index < total_environments_;
+       ++environment_index) {
+    ales_[environment_index]->getScreenGrayscale(gray_scale);
+    auto frame = torch::from_blob(
+        gray_scale.data(), {screen_width_, screen_height_}, torch::kByte);
+    if (is_episode_start_[environment_index].item<bool>()) {
+      for (int64_t frame_index = 0; frame_index < frame_stack_; ++frame_index) {
+        observations_.index_put_({environment_index, frame_index}, frame);
+      }
+    } else {
+      observations_.index_put_({environment_index, 0}, frame);
+    }
+  }
 }
 
 RolloutResult Rollout::rollout() {
-  ActionResult action_result = select_action();
+  get_observations();
+  ActionResult action_result = action_selector_(observations_);
+
   std::vector<float> episode_returns;
   std::vector<size_t> episode_lengths;
 
-  for (size_t i = 0; i < horizon_; i++) {
-    if (is_episode_start_) {
-      buffer_.add(observation_, action_result.action, 0, is_terminal_,
-                  is_truncated_, is_episode_start_, action_result.logits,
-                  action_result.value);
-      current_step_ = 0;
-      is_episode_start_ = false;
-      ale_.reset_game();
-      get_reset_observation();
-    } else {
-      action_result = select_action();
-      auto reward = ale_.act(
-          ale_.getMinimalActionSet()[action_result.action.item<int64_t>()]);
-      is_terminal_ = ale_.game_over(false);
-      is_truncated_ =
-          is_terminal_ ? false
-                       : ale_.game_truncated() || current_step_ >= max_steps_;
+  for (size_t time_index = 0; time_index < horizon_; time_index++) {
+    for (int64_t ale_index = 0; ale_index < total_environments_; ++ale_index) {
+      if (is_episode_start_[ale_index].item<bool>()) {
+        ales_[ale_index]->reset_game();
+      } else {
+        auto ale_action_set = ales_[ale_index]->getMinimalActionSet();
+        int64_t action_index = action_result.actions[ale_index].item<int64_t>();
+        if (action_index < 0 || action_index >= ale_action_set.size()) {
+          throw std::out_of_range("Action index out of range for environment " +
+                                  std::to_string(ale_index));
+        }
+        auto ale_action = ale_action_set[action_index];
+        auto reward = ales_[ale_index]->act(ale_action);
+        bool terminal = ales_[ale_index]->game_over(false);
+        bool truncated = (!terminal) && ales_[ale_index]->game_truncated();
 
-      current_episode_return_ += static_cast<float>(reward);
-      current_episode_length_++;
-      total_steps_++;
+        rewards_[ale_index] = reward;
+        is_terminal_[ale_index] = terminal;
+        is_truncated_[ale_index] = truncated;
 
-      buffer_.add(observation_, action_result.action, reward, is_terminal_,
-                  is_episode_start_, is_truncated_, action_result.logits,
-                  action_result.value);
-      get_observation();
-      current_step_++;
+        episode_returns_[ale_index] += reward;
+        episode_lengths_[ale_index]++;
+      }
     }
-    if (is_terminal_ || is_truncated_) {
-      is_episode_start_ = true;
-      is_terminal_ = false;
-      is_truncated_ = false;
-      current_episode_++;
-      episode_returns.push_back(current_episode_return_);
-      episode_lengths.push_back(current_episode_length_);
-      current_episode_return_ = 0.0f;
-      current_episode_length_ = 0;
+
+    // Add the observations, and the actions that from those observations led to
+    // the rewards and terminal state changes.
+    buffer_.add(observations_, action_result.actions, rewards_, is_terminal_,
+                is_episode_start_, is_truncated_, action_result.logits,
+                action_result.values);
+
+    // Get the next observations after taking actions.
+    get_observations();
+
+    for (int64_t ale_index = 0; ale_index < total_environments_; ++ale_index) {
+      if (is_terminal_[ale_index].item<bool>() ||
+          is_truncated_[ale_index].item<bool>()) {
+        is_episode_start_[ale_index] = true;
+        is_terminal_[ale_index] = false;
+        is_truncated_[ale_index] = false;
+        current_episode_++;
+        episode_returns.push_back(episode_returns_[ale_index]);
+        episode_lengths.push_back(episode_lengths_[ale_index]);
+        episode_returns_[ale_index] = 0.0;
+        episode_lengths_[ale_index] = 0;
+      } else {
+        is_episode_start_[ale_index] = false;
+      }
     }
+
+    // Select actions for the next step.
+    action_result = action_selector_(observations_);
+    total_steps_ += total_environments_;
   }
 
-  action_result = select_action();
-  auto advantages =
-      ai::gae::gae(buffer_.rewards_, buffer_.values_, action_result.value,
-                   buffer_.terminals_, buffer_.truncations_,
-                   buffer_.episode_starts_, gae_gamma_, gae_lambda_);
+  auto advantages = ai::gae::gae(
+      buffer_.rewards_, buffer_.values_, action_result.values.to(torch::kCPU),
+      buffer_.terminals_, buffer_.truncations_, buffer_.episode_starts_,
+      gae_gamma_, gae_lambda_);
   auto returns = advantages + buffer_.values_;
 
   Batch batch{buffer_.observations_,

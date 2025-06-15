@@ -2,6 +2,7 @@
 #include "buffer.h"
 #include <filesystem>
 #include <functional>
+#include <memory>
 #include <torch/torch.h>
 
 namespace ai::rollout {
@@ -30,41 +31,44 @@ struct RolloutResult {
 };
 
 struct ActionResult {
-  torch::Tensor action;
+  torch::Tensor actions;
   torch::Tensor logits;
-  torch::Tensor value;
+  torch::Tensor values;
 };
 
 class Rollout {
 public:
-  Rollout(std::filesystem::path rom_path, size_t horizon, size_t max_steps,
-          size_t frame_stack,
+  Rollout(std::filesystem::path rom_path, size_t total_environments,
+          size_t horizon, size_t max_steps, size_t frame_stack,
           std::function<ActionResult(const torch::Tensor &)> action_selector,
           float gae_gamma, float gae_lambda);
   RolloutResult rollout();
-  ActionResult select_action();
-  void get_reset_observation();
-  void get_observation();
+  void get_observations();
 
   float gae_gamma_ = 0.99f;
   float gae_lambda_ = 0.95f;
 
 private:
-  ale::ALEInterface ale_;
+  int64_t screen_width_;
+  int64_t screen_height_;
+  std::vector<std::unique_ptr<ale::ALEInterface>> ales_;
   std::string rom_path_;
   ai::buffer::Buffer buffer_;
-  std::vector<unsigned char> observation_;
+  torch::Tensor observations_;
+  int64_t total_environments_;
   size_t horizon_;
-  size_t frame_stack_;
+  int64_t frame_stack_;
   size_t max_steps_;
   size_t current_episode_ = 0;
-  size_t current_step_ = 0;
   size_t total_steps_ = 0;
   float current_episode_return_ = 0.0f;
   size_t current_episode_length_ = 0;
-  bool is_terminal_ = false;
-  bool is_truncated_ = false;
-  bool is_episode_start_ = false;
+  torch::Tensor is_terminal_;
+  torch::Tensor is_truncated_;
+  torch::Tensor is_episode_start_;
+  std::vector<float> episode_returns_;
+  std::vector<size_t> episode_lengths_;
+  torch::Tensor rewards_;
   std::function<ActionResult(const torch::Tensor &)> action_selector_;
 };
 

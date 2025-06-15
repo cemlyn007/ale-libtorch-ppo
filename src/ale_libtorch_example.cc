@@ -11,9 +11,10 @@
 #include <torch/torch.h>
 
 struct Config {
+  size_t total_environments = 32;
   size_t hidden_size = 32;
   size_t action_size = 4;
-  size_t horizon = 1024;
+  size_t horizon = 128;
   size_t max_steps = 108000;
   size_t frame_stack = 4;
   double learning_rate = 2.5e-4;
@@ -22,9 +23,9 @@ struct Config {
   double entropy_coef = 0.001;
   long num_epochs = 4;
   long mini_batch_size = 256;
-  long num_mini_batches = 4; // num_mini_batches = horizon / mini_batch_size
-  float gae_gamma = 0.99f;   // Discount factor for rewards
-  float gae_lambda = 0.95f;  // GAE lambda for advantage estimation
+  long num_mini_batches = 16; // num_mini_batches = horizon / mini_batch_size
+  float gae_gamma = 0.99f;    // Discount factor for rewards
+  float gae_lambda = 0.95f;   // GAE lambda for advantage estimation
   float max_gradient_norm = 0.5f; // Maximum norm for gradient clipping
   size_t num_rollouts = 1000000;
   bool log_images = false;
@@ -158,19 +159,19 @@ int main(int argc, char **argv) {
   torch::optim::Adam optimizer(network->parameters(),
                                torch::optim::AdamOptions(config.learning_rate));
   ai::rollout::Rollout rollout(
-      std::filesystem::path(path), config.horizon, config.max_steps,
-      config.frame_stack,
+      std::filesystem::path(path), config.total_environments, config.horizon,
+      config.max_steps, config.frame_stack,
       [&network, &device,
        &action_size](const torch::Tensor &obs) -> ai::rollout::ActionResult {
         torch::NoGradGuard no_grad;
-        auto observation = device.is_cuda() ? obs.to(torch::kFloat32) : obs;
-        auto output = network->forward(observation.to(device).unsqueeze(0));
+        auto observations = device.is_cuda() ? obs.to(torch::kFloat32) : obs;
+        auto output = network->forward(observations.to(device));
         auto logits = output.logits;
         auto probabilities = torch::nn::functional::softmax(
             logits, torch::nn::functional::SoftmaxFuncOptions(-1));
-        auto action = torch::multinomial(probabilities, 1, true);
-        return {action.reshape({}), logits.reshape({action_size}),
-                output.value.reshape({})};
+        auto actions = torch::multinomial(probabilities, 1, true);
+        return {actions.ravel(), logits.reshape({-1, action_size}),
+                output.value.ravel()};
       },
       config.gae_gamma, config.gae_lambda);
 
@@ -196,12 +197,17 @@ int main(int argc, char **argv) {
       logger.add_histogram("episode_lengths", log.steps, log.episode_lengths);
     }
 
-    auto batch_observations = batch.observations.to(device);
-    auto batch_actions = batch.actions.to(device);
-    auto batch_advantages = batch.advantages.to(device);
-    auto batch_logits = batch.logits.to(device);
-    auto batch_returns = batch.returns.to(device);
-    auto batch_masks = batch.masks.to(device);
+    auto batch_observations =
+        batch.observations
+            .reshape({-1, batch.observations.size(2),
+                      batch.observations.size(3), batch.observations.size(4)})
+            .to(device);
+    auto batch_actions = batch.actions.ravel().to(device);
+    auto batch_advantages = batch.advantages.ravel().to(device);
+    auto batch_logits =
+        batch.logits.reshape({-1, batch.logits.size(2)}).to(device);
+    auto batch_returns = batch.returns.ravel().to(device);
+    auto batch_masks = batch.masks.ravel().to(device);
 
     if (batch_observations.size(0) !=
         config.mini_batch_size * config.num_mini_batches) {

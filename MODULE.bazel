@@ -34,9 +34,10 @@ http_archive(
 bazel_dep(name = "platforms", version = "0.0.11")
 
 bazel_dep(name = "tensorboard_logger")
-local_path_override(
+git_override(
     module_name = "tensorboard_logger",
-    path = "../tensorboard_logger",
+    commit = "18096201dfa74a52493bdd0f60b270689ac111e7",
+    remote = "https://github.com/cemlyn007/tensorboard_logger.git",
 )
 
 libtorch_extension = use_extension("//third_party:libtorch.bzl", "libtorch_configure_extension")

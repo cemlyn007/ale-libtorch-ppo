@@ -51,8 +51,10 @@ use_repo(libtorch_extension, "libtorch")
 bazel_dep(name = "hedron_compile_commands", dev_dependency = True)
 git_override(
     module_name = "hedron_compile_commands",
-    remote = "https://github.com/mikael-s-persson/bazel-compile-commands-extractor",
-    commit = "f5fbd4cee671d8d908f37c83abaf70fba5928fc7",
+    remote = "https://github.com/hedronvision/bazel-compile-commands-extractor.git",
+    commit = "4f28899228fb3ad0126897876f147ca15026151e",
+    patches = [
+        ":third_party/hedron_compile_commands.patch",
+    ],
 )
-
 bazel_dep(name = "stb", version = "0.0.0-20241109-5c20573")

@@ -25,12 +25,12 @@ Metrics ppo_loss(const torch::Tensor &logits, const torch::Tensor &old_logits,
   auto total_losses = clipped_losses + value_loss_coef * value_losses -
                       entropy_coef * entropies;
   return {torch::where(masks, total_losses, 0.0).sum() / masks.sum(),
-          clipped_losses,
-          value_losses,
-          entropies,
-          total_losses,
-          ratio,
-          masks};
+          clipped_losses.detach(),
+          value_losses.detach(),
+          entropies.detach(),
+          total_losses.detach(),
+          ratio.detach(),
+          masks.detach()};
 }
 
 } // namespace ai::ppo

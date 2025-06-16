@@ -2,30 +2,38 @@
 #include <torch/torch.h>
 namespace ai::buffer {
 Buffer::Buffer(size_t total_environments, size_t capacity,
-               std::vector<size_t> observation_shape, size_t action_size)
-    : total_environments_(total_environments), capacity_(capacity),
-      indices_(0) {
+               std::vector<size_t> observation_shape, size_t action_size,
+               const torch::Device &device)
+    : device_(device), total_environments_(total_environments),
+      capacity_(capacity), indices_(0) {
   observation_shape_ =
       std::vector<int64_t>(observation_shape.begin(), observation_shape.end());
   auto buffer_observation_shape = observation_shape_;
   buffer_observation_shape.insert(buffer_observation_shape.begin(), capacity_);
   buffer_observation_shape.insert(buffer_observation_shape.begin(),
                                   total_environments_);
-  observations_ = torch::zeros(buffer_observation_shape, torch::kByte);
+  observations_ =
+      torch::zeros(buffer_observation_shape,
+                   torch::TensorOptions(torch::kByte).device(device_));
   long total_environments_long = static_cast<long>(total_environments_);
   long capacity_long = static_cast<long>(capacity_);
-  actions_ =
-      torch::zeros({total_environments_long, capacity_long}, torch::kLong);
-  rewards_ = torch::zeros({total_environments_long, capacity_long});
-  terminals_ =
-      torch::zeros({total_environments_long, capacity_long}, torch::kBool);
+  actions_ = torch::zeros({total_environments_long, capacity_long},
+                          torch::TensorOptions(torch::kLong).device(device_));
+  rewards_ = torch::zeros({total_environments_long, capacity_long},
+                          torch::TensorOptions(torch::kFloat).device(device_));
+  terminals_ = torch::zeros({total_environments_long, capacity_long},
+                            torch::TensorOptions(torch::kBool).device(device_));
   truncations_ =
-      torch::zeros({total_environments_long, capacity_long}, torch::kBool);
+      torch::zeros({total_environments_long, capacity_long},
+                   torch::TensorOptions(torch::kBool).device(device_));
   episode_starts_ =
-      torch::zeros({total_environments_long, capacity_long}, torch::kBool);
+      torch::zeros({total_environments_long, capacity_long},
+                   torch::TensorOptions(torch::kBool).device(device_));
   logits_ = torch::zeros({total_environments_long, capacity_long,
-                          static_cast<int64_t>(action_size)});
-  values_ = torch::zeros({total_environments_long, capacity_long});
+                          static_cast<int64_t>(action_size)},
+                         torch::TensorOptions(torch::kFloat).device(device_));
+  values_ = torch::zeros({total_environments_long, capacity_long},
+                         torch::TensorOptions(torch::kFloat).device(device_));
 }
 
 void Buffer::add(const torch::Tensor &observations,

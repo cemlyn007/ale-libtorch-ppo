@@ -11,7 +11,7 @@
 #include <torch/torch.h>
 
 struct Config {
-  size_t total_environments = 32;
+  size_t total_environments = 64;
   size_t hidden_size = 32;
   size_t action_size = 4;
   size_t horizon = 128;
@@ -23,12 +23,12 @@ struct Config {
   double entropy_coef = 0.001;
   long num_epochs = 4;
   long mini_batch_size = 256;
-  long num_mini_batches = 16; // num_mini_batches = horizon / mini_batch_size
+  long num_mini_batches = 32; // num_mini_batches = horizon / mini_batch_size
   float gae_gamma = 0.99f;    // Discount factor for rewards
   float gae_lambda = 0.95f;   // GAE lambda for advantage estimation
   float max_gradient_norm = 0.5f; // Maximum norm for gradient clipping
   size_t num_rollouts = 1000000;
-  bool log_images = false;
+  size_t log_episode_frequency = 10;
 };
 
 static const Config config = Config();
@@ -133,8 +133,9 @@ compute_loss(Network &network, const torch::Tensor &observations,
 }
 
 int main(int argc, char **argv) {
-  auto path = argv[1];
+  const auto rom_path = argv[1];
   auto logger_path = std::filesystem::path(argv[2]);
+  const auto png_path = std::filesystem::path(argv[3]);
   torch::Device device(torch::kCPU);
   if (torch::cuda::is_available()) {
     std::cout << "CUDA is available! Training on GPU." << std::endl;
@@ -146,6 +147,14 @@ int main(int argc, char **argv) {
   if (!std::filesystem::exists(logger_path.parent_path())) {
     std::filesystem::create_directories(logger_path.parent_path());
   }
+
+  // For writing the images
+  int64_t png_episode = -1;
+  int64_t frame_number = 0;
+  auto png_subfolder =
+      png_path /
+      std::to_string(
+          std::chrono::system_clock::now().time_since_epoch().count());
 
   auto timestamp = std::chrono::system_clock::now().time_since_epoch().count();
   logger_path =
@@ -159,8 +168,8 @@ int main(int argc, char **argv) {
   torch::optim::Adam optimizer(network->parameters(),
                                torch::optim::AdamOptions(config.learning_rate));
   ai::rollout::Rollout rollout(
-      std::filesystem::path(path), config.total_environments, config.horizon,
-      config.max_steps, config.frame_stack,
+      std::filesystem::path(rom_path), config.total_environments,
+      config.horizon, config.max_steps, config.frame_stack,
       [&network, &device,
        &action_size](const torch::Tensor &obs) -> ai::rollout::ActionResult {
         torch::NoGradGuard no_grad;
@@ -173,7 +182,7 @@ int main(int argc, char **argv) {
         return {actions.ravel(), logits.reshape({-1, action_size}),
                 output.value.ravel()};
       },
-      config.gae_gamma, config.gae_lambda);
+      config.gae_gamma, config.gae_lambda, device);
 
   for (size_t i = 0; i < config.num_rollouts; i++) {
     std::cout << "Rollout " << i + 1 << " of " << config.num_rollouts
@@ -197,17 +206,14 @@ int main(int argc, char **argv) {
       logger.add_histogram("episode_lengths", log.steps, log.episode_lengths);
     }
 
-    auto batch_observations =
-        batch.observations
-            .reshape({-1, batch.observations.size(2),
-                      batch.observations.size(3), batch.observations.size(4)})
-            .to(device);
-    auto batch_actions = batch.actions.ravel().to(device);
-    auto batch_advantages = batch.advantages.ravel().to(device);
-    auto batch_logits =
-        batch.logits.reshape({-1, batch.logits.size(2)}).to(device);
-    auto batch_returns = batch.returns.ravel().to(device);
-    auto batch_masks = batch.masks.ravel().to(device);
+    auto batch_observations = batch.observations.reshape(
+        {-1, batch.observations.size(2), batch.observations.size(3),
+         batch.observations.size(4)});
+    auto batch_actions = batch.actions.ravel();
+    auto batch_advantages = batch.advantages.ravel();
+    auto batch_logits = batch.logits.reshape({-1, batch.logits.size(2)});
+    auto batch_returns = batch.returns.ravel();
+    auto batch_masks = batch.masks.ravel();
 
     if (batch_observations.size(0) !=
         config.mini_batch_size * config.num_mini_batches) {
@@ -327,23 +333,33 @@ int main(int argc, char **argv) {
     logger.add_histogram("returns", log.steps,
                          gather(metric_returns, metric_masks));
 
-    if (config.log_images) {
-      for (int64_t index = 0; index < batch_observations.size(0); ++index) {
-        auto observation = batch_observations.index({index, 0}).to(torch::kCPU);
-        auto numel = observation.numel();
-        std::vector<unsigned char> img_data(numel);
-        std::memcpy(img_data.data(), observation.data_ptr<uint8_t>(),
-                    numel * sizeof(uint8_t));
-        int width = 160, height = 210, channels = 1;
-        std::string png_data;
-        auto write_func = [](void *context, void *data, int size) {
-          auto *str = static_cast<std::string *>(context);
-          str->append(static_cast<char *>(data), size);
-        };
-        stbi_write_png_to_func(write_func, &png_data, width, height, channels,
-                               img_data.data(), width * channels);
-        logger.add_image("observation", log.steps - config.horizon + index,
-                         png_data, 210, 160, 1);
+    auto observations =
+        batch.observations.index({0, torch::indexing::Slice(), 0})
+            .to(torch::kCPU);
+    auto masks = batch.masks[0].to(torch::kCPU);
+    static int width = 160, height = 210, channels = 1;
+    for (size_t frame = 0; frame < config.horizon; ++frame) {
+      bool new_episode = !masks[frame].item<bool>();
+      if (new_episode) {
+        frame_number = 0;
+        ++png_episode;
+      }
+      if (png_episode % config.log_episode_frequency == 0) {
+        if (new_episode) {
+          png_subfolder =
+              png_path /
+              std::to_string(
+                  std::chrono::system_clock::now().time_since_epoch().count());
+          if (!std::filesystem::exists(png_subfolder)) {
+            std::filesystem::create_directories(png_subfolder);
+          }
+          frame_number = 0;
+        }
+        const auto &observation = observations[frame];
+        auto path = png_subfolder / (std::to_string(frame_number) + ".png");
+        stbi_write_png(path.c_str(), width, height, channels,
+                       observation.data_ptr<uint8_t>(), width * channels);
+        ++frame_number;
       }
     }
   }

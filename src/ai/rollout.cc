@@ -7,7 +7,7 @@ Rollout::Rollout(
     std::filesystem::path rom_path, size_t total_environments, size_t horizon,
     size_t max_steps, size_t frame_stack,
     std::function<ActionResult(const torch::Tensor &)> action_selector,
-    float gae_gamma, float gae_lambda)
+    float gae_gamma, float gae_lambda, const torch::Device &device)
     : gae_gamma_(gae_gamma), gae_lambda_(gae_lambda), ales_(),
       rom_path_(rom_path), buffer_([&] {
         ale::ALEInterface ale;
@@ -16,11 +16,12 @@ Rollout::Rollout(
         return ai::buffer::Buffer(
             total_environments, horizon,
             {frame_stack, screen.width(), screen.height()},
-            ale.getMinimalActionSet().size());
+            ale.getMinimalActionSet().size(), device);
       }()),
       total_environments_(total_environments), horizon_(horizon),
       frame_stack_(frame_stack), max_steps_(max_steps), is_terminal_(),
-      is_truncated_(), is_episode_start_(), action_selector_(action_selector) {
+      is_truncated_(), is_episode_start_(), action_selector_(action_selector),
+      device_(device) {
 
   // TODO: Initialize vectors etc
   if (total_environments_ == 0) {
@@ -48,8 +49,6 @@ Rollout::Rollout(
     ales_.back()->setBool("truncate_on_loss_of_life", true);
     ales_.back()->setInt("max_num_frames_per_episode", 108000);
     ales_.back()->setInt("frame_skip", 1);
-    ales_.back()->setInt("reward_min", -1);
-    ales_.back()->setInt("reward_max", 1);
     ales_.back()->setInt("random_seed", i);
     ales_.back()->setFloat("repeat_action_probability", 0.0f);
     screen_width_ = ales_.back()->getScreen().width();
@@ -58,11 +57,23 @@ Rollout::Rollout(
 
   observations_ = torch::zeros(
       {total_environments_, frame_stack_, screen_width_, screen_height_},
-      torch::kByte);
-  is_terminal_ = torch::zeros({total_environments_}, torch::kBool);
-  is_truncated_ = torch::zeros({total_environments_}, torch::kBool);
-  is_episode_start_ = torch::ones({total_environments_}, torch::kBool);
-  rewards_ = torch::zeros({total_environments_}, torch::kFloat32);
+      torch::TensorOptions(torch::kByte).device(device_));
+  is_terminal_ =
+      torch::zeros({total_environments_},
+                   torch::TensorOptions(torch::kBool).device(device_));
+  is_truncated_ =
+      torch::zeros({total_environments_},
+                   torch::TensorOptions(torch::kBool).device(device_));
+  is_episode_start_ =
+      torch::ones({total_environments_},
+                  torch::TensorOptions(torch::kBool).device(device_));
+  rewards_ =
+      torch::zeros({total_environments_},
+                   torch::TensorOptions(torch::kFloat32).device(device_));
+  advantages_ =
+      torch::zeros({total_environments_, static_cast<long>(horizon_)},
+                   torch::TensorOptions(torch::kFloat32).device(device_));
+  returns_ = torch::zeros_like(advantages_);
   episode_returns_.resize(total_environments_, 0.0f);
   episode_lengths_.resize(total_environments_, 0);
 }
@@ -125,7 +136,7 @@ RolloutResult Rollout::rollout() {
     // Add the observations, and the actions that from those observations led to
     // the rewards and terminal state changes.
     buffer_.add(observations_, action_result.actions, rewards_, is_terminal_,
-                is_episode_start_, is_truncated_, action_result.logits,
+                is_truncated_, is_episode_start_, action_result.logits,
                 action_result.values);
 
     // Get the next observations after taking actions.
@@ -152,20 +163,18 @@ RolloutResult Rollout::rollout() {
     total_steps_ += total_environments_;
   }
 
-  auto advantages = ai::gae::gae(
-      buffer_.rewards_, buffer_.values_, action_result.values.to(torch::kCPU),
-      buffer_.terminals_, buffer_.truncations_, buffer_.episode_starts_,
-      gae_gamma_, gae_lambda_);
-  auto returns = advantages + buffer_.values_;
+  buffer_.rewards_.clamp_(-1.0f, 1.0f);
+  ai::gae::gae(advantages_, buffer_.rewards_, buffer_.values_,
+               action_result.values, buffer_.terminals_, buffer_.truncations_,
+               buffer_.episode_starts_, gae_gamma_, gae_lambda_);
+  returns_.copy_(advantages_);
+  returns_.add_(buffer_.values_);
 
-  Batch batch{buffer_.observations_,
-              buffer_.actions_,
-              buffer_.rewards_,
-              torch::logical_not(buffer_.episode_starts_),
-              buffer_.logits_,
-              buffer_.values_,
-              advantages,
-              returns};
+  Batch batch{
+      buffer_.observations_, buffer_.actions_,
+      buffer_.rewards_,      torch::logical_not(buffer_.episode_starts_),
+      buffer_.logits_,       buffer_.values_,
+      advantages_,           returns_};
 
   Log log{total_steps_, current_episode_, episode_returns, episode_lengths};
 

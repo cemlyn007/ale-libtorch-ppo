@@ -41,7 +41,7 @@ public:
   Rollout(std::filesystem::path rom_path, size_t total_environments,
           size_t horizon, size_t max_steps, size_t frame_stack,
           std::function<ActionResult(const torch::Tensor &)> action_selector,
-          float gae_gamma, float gae_lambda);
+          float gae_gamma, float gae_lambda, const torch::Device &device);
   RolloutResult rollout();
   void get_observations();
 
@@ -70,6 +70,9 @@ private:
   std::vector<size_t> episode_lengths_;
   torch::Tensor rewards_;
   std::function<ActionResult(const torch::Tensor &)> action_selector_;
+  torch::Tensor advantages_;
+  torch::Tensor returns_;
+  torch::Device device_;
 };
 
 } // namespace ai::rollout

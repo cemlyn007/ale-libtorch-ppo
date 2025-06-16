@@ -5,7 +5,8 @@ namespace ai::buffer {
 class Buffer {
 public:
   Buffer(size_t total_environments, size_t capacity,
-         std::vector<size_t> observation_shape, size_t action_size);
+         std::vector<size_t> observation_shape, size_t action_size,
+         const torch::Device &device);
 
   void add(const torch::Tensor &observations, const torch::Tensor &actions,
            const torch::Tensor &rewards, const torch::Tensor &terminals,
@@ -23,6 +24,7 @@ public:
   torch::Tensor values_;
 
 private:
+  torch::Device device_;
   size_t total_environments_;
   size_t capacity_;
   std::vector<int64_t> observation_shape_;

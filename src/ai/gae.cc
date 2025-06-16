@@ -1,12 +1,10 @@
 #include "gae.h"
 
 namespace ai::gae {
-torch::Tensor gae(const torch::Tensor &rewards, const torch::Tensor &values,
-                  const torch::Tensor &next_values,
-                  const torch::Tensor &terminals,
-                  const torch::Tensor &truncations,
-                  const torch::Tensor &episode_starts, float gamma,
-                  float lambda) {
+void gae(torch::Tensor &advantages, const torch::Tensor &rewards,
+         const torch::Tensor &values, const torch::Tensor &next_values,
+         const torch::Tensor &terminals, const torch::Tensor &truncations,
+         const torch::Tensor &episode_starts, float gamma, float lambda) {
   if (rewards.dim() != 2 || values.dim() != 2 || next_values.dim() != 1 ||
       terminals.dim() != 2 || truncations.dim() != 2 ||
       episode_starts.dim() != 2) {
@@ -45,7 +43,6 @@ torch::Tensor gae(const torch::Tensor &rewards, const torch::Tensor &values,
   }
   auto total_environments = rewards.size(0);
   auto num_steps = rewards.size(1);
-  auto advantages = torch::zeros_like(rewards);
   auto last_advantages = torch::zeros(total_environments, rewards.options());
   torch::Tensor nv = next_values;
   for (int64_t i = num_steps - 1; i >= 0; --i) {
@@ -71,7 +68,6 @@ torch::Tensor gae(const torch::Tensor &rewards, const torch::Tensor &values,
     last_advantages = advantages.index({torch::indexing::Slice(), i});
     nv = values.index({torch::indexing::Slice(), i});
   }
-  return advantages;
 }
 
 } // namespace ai::gae

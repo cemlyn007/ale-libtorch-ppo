@@ -175,8 +175,7 @@ int main(int argc, char **argv) {
         auto observations = device.is_cuda() ? obs.to(torch::kFloat32) : obs;
         auto output = network->forward(observations.to(device));
         auto logits = output.logits;
-        auto probabilities = torch::nn::functional::softmax(
-            logits, torch::nn::functional::SoftmaxFuncOptions(-1));
+        auto probabilities = torch::nn::functional::softmax(logits, -1);
         auto actions = torch::multinomial(probabilities, 1, true);
         return {actions.ravel(), logits.reshape({-1, action_size}),
                 output.value.ravel()};

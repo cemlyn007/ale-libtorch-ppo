@@ -58,3 +58,10 @@ git_override(
     ],
 )
 bazel_dep(name = "stb", version = "0.0.0-20241109-5c20573")
+
+bazel_dep(name = "googletest", version = "1.17.0")
+git_override(
+    module_name = "googletest",
+    remote = "https://github.com/google/googletest.git",
+    commit = "35b75a2cba6ef72b7ce2b6b94b05c54ca07df866",
+)

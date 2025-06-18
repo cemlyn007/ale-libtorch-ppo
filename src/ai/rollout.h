@@ -7,17 +7,6 @@
 
 namespace ai::rollout {
 
-struct Batch {
-  torch::Tensor observations;
-  torch::Tensor actions;
-  torch::Tensor rewards;
-  torch::Tensor masks;
-  torch::Tensor logits;
-  torch::Tensor values;
-  torch::Tensor advantages;
-  torch::Tensor returns;
-};
-
 struct Log {
   size_t steps;
   size_t episodes;
@@ -26,7 +15,7 @@ struct Log {
 };
 
 struct RolloutResult {
-  Batch batch;
+  ai::buffer::Batch batch;
   Log log;
 };
 
@@ -41,11 +30,11 @@ public:
   Rollout(std::filesystem::path rom_path, size_t total_environments,
           size_t horizon, size_t max_steps, size_t frame_stack,
           std::function<ActionResult(const torch::Tensor &)> action_selector,
-          float gae_gamma, float gae_lambda, const torch::Device &device);
+          float gae_discount, float gae_lambda, const torch::Device &device);
   RolloutResult rollout();
   void get_observations();
 
-  float gae_gamma_ = 0.99f;
+  float gae_discount_ = 0.99f;
   float gae_lambda_ = 0.95f;
 
 private:
@@ -70,8 +59,6 @@ private:
   std::vector<size_t> episode_lengths_;
   torch::Tensor rewards_;
   std::function<ActionResult(const torch::Tensor &)> action_selector_;
-  torch::Tensor advantages_;
-  torch::Tensor returns_;
   torch::Device device_;
 };
 

@@ -12,8 +12,8 @@
 #include <torch/torch.h>
 
 struct Config {
-  size_t total_environments = 64;
-  size_t hidden_size = 32;
+  size_t total_environments = 8;
+  size_t hidden_size = 128;
   size_t action_size = 4;
   size_t horizon = 128;
   size_t max_steps = 108000;
@@ -21,11 +21,11 @@ struct Config {
   double learning_rate = 2.5e-4;
   double clip_param = 0.2;
   double value_loss_coef = 0.5;
-  double entropy_coef = 0.001;
+  double entropy_coef = 0.01;
   long num_epochs = 4;
   long mini_batch_size = 256;
-  long num_mini_batches = 32; // num_mini_batches = horizon / mini_batch_size
-  float gae_gamma = 0.99f;    // Discount factor for rewards
+  long num_mini_batches = 4;  // num_mini_batches = horizon / mini_batch_size
+  float gae_discount = 0.99f; // Discount factor for rewards
   float gae_lambda = 0.95f;   // GAE lambda for advantage estimation
   float max_gradient_norm = 0.5f; // Maximum norm for gradient clipping
   size_t num_rollouts = 1000000;
@@ -173,7 +173,7 @@ int main(int argc, char **argv) {
         return {actions.ravel(), logits.reshape({-1, action_size}),
                 output.value.ravel()};
       },
-      config.gae_gamma, config.gae_lambda, device);
+      config.gae_discount, config.gae_lambda, device);
 
   ai::rollout::RolloutResult result;
   auto clipped_gradients =

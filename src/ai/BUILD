@@ -19,6 +19,7 @@ cc_library(
     hdrs = ["buffer.h"],
     strip_include_prefix = "/src",
     deps = [
+        ":gae",
         "@arcade_learning_environment//:ale",
         "@libtorch//:torch",
     ],

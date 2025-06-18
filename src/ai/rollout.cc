@@ -8,8 +8,8 @@ Rollout::Rollout(
     std::filesystem::path rom_path, size_t total_environments, size_t horizon,
     size_t max_steps, size_t frame_stack,
     std::function<ActionResult(const torch::Tensor &)> action_selector,
-    float gae_gamma, float gae_lambda, const torch::Device &device)
-    : gae_gamma_(gae_gamma), gae_lambda_(gae_lambda), ales_(),
+    float gae_discount, float gae_lambda, const torch::Device &device)
+    : gae_discount_(gae_discount), gae_lambda_(gae_lambda), ales_(),
       rom_path_(rom_path), buffer_([&] {
         ale::ALEInterface ale;
         ale.loadROM(rom_path);
@@ -72,10 +72,6 @@ Rollout::Rollout(
   rewards_ =
       torch::zeros({total_environments_},
                    torch::TensorOptions(torch::kFloat32).device(device_));
-  advantages_ =
-      torch::zeros({total_environments_, static_cast<long>(horizon_)},
-                   torch::TensorOptions(torch::kFloat32).device(device_));
-  returns_ = torch::zeros_like(advantages_);
   episode_returns_.resize(total_environments_, 0.0f);
   episode_lengths_.resize(total_environments_, 0);
 }
@@ -165,18 +161,7 @@ RolloutResult Rollout::rollout() {
     total_steps_ += total_environments_;
   }
 
-  buffer_.rewards_.clamp_(-1.0f, 1.0f);
-  ai::gae::gae(advantages_, buffer_.rewards_, buffer_.values_,
-               action_result.values, buffer_.terminals_, buffer_.truncations_,
-               buffer_.episode_starts_, gae_gamma_, gae_lambda_);
-  returns_.copy_(advantages_);
-  returns_.add_(buffer_.values_);
-
-  Batch batch{
-      buffer_.observations_, buffer_.actions_,
-      buffer_.rewards_,      torch::logical_not(buffer_.episode_starts_),
-      buffer_.logits_,       buffer_.values_,
-      advantages_,           returns_};
+  auto batch = buffer_.get(action_result.values, gae_discount_, gae_lambda_);
 
   Log log{total_steps_, current_episode_, episode_returns, episode_lengths};
 

@@ -1,4 +1,5 @@
 #include "buffer.h"
+#include "ai/gae.h"
 #include <torch/torch.h>
 namespace ai::buffer {
 Buffer::Buffer(size_t total_environments, size_t capacity,
@@ -17,10 +18,12 @@ Buffer::Buffer(size_t total_environments, size_t capacity,
                    torch::TensorOptions(torch::kByte).device(device_));
   long total_environments_long = static_cast<long>(total_environments_);
   long capacity_long = static_cast<long>(capacity_);
+
+  auto float_options = torch::TensorOptions(torch::kFloat).device(device_);
   actions_ = torch::zeros({total_environments_long, capacity_long},
                           torch::TensorOptions(torch::kLong).device(device_));
-  rewards_ = torch::zeros({total_environments_long, capacity_long},
-                          torch::TensorOptions(torch::kFloat).device(device_));
+  rewards_ =
+      torch::zeros({total_environments_long, capacity_long}, float_options);
   terminals_ = torch::zeros({total_environments_long, capacity_long},
                             torch::TensorOptions(torch::kBool).device(device_));
   truncations_ =
@@ -31,9 +34,14 @@ Buffer::Buffer(size_t total_environments, size_t capacity,
                    torch::TensorOptions(torch::kBool).device(device_));
   logits_ = torch::zeros({total_environments_long, capacity_long,
                           static_cast<int64_t>(action_size)},
-                         torch::TensorOptions(torch::kFloat).device(device_));
-  values_ = torch::zeros({total_environments_long, capacity_long},
-                         torch::TensorOptions(torch::kFloat).device(device_));
+                         float_options);
+  values_ =
+      torch::zeros({total_environments_long, capacity_long}, float_options);
+
+  advantages_ =
+      torch::zeros({total_environments_long, capacity_long},
+                   torch::TensorOptions(torch::kFloat32).device(device_));
+  returns_ = torch::zeros_like(advantages_);
 }
 
 void Buffer::add(const torch::Tensor &observations,
@@ -52,5 +60,23 @@ void Buffer::add(const torch::Tensor &observations,
   logits_.index_put_({torch::indexing::Slice(), indices_}, logits);
   values_.index_put_({torch::indexing::Slice(), indices_}, values);
   indices_ = (indices_ + 1) % capacity_;
+}
+
+Batch Buffer::get(const torch::Tensor &next_values, float discount,
+                  float lambda) {
+  // This function is a placeholder for the actual implementation.
+  // It should return a reference to a Batch object containing the data
+  // from the buffer, possibly using the final value function estimates
+  // for the last observations.
+  rewards_.clamp_(-1.0f, 1.0f);
+  ai::gae::gae(advantages_, rewards_, values_, next_values, terminals_,
+               truncations_, episode_starts_, discount, lambda);
+  returns_.copy_(advantages_);
+  returns_.add_(values_);
+
+  Batch batch{
+      observations_, actions_, rewards_,    torch::logical_not(episode_starts_),
+      logits_,       values_,  advantages_, returns_};
+  return batch;
 }
 } // namespace ai::buffer

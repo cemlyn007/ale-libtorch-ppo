@@ -9,7 +9,5 @@ cc_test(
         "//src:ai",
         "@googletest//:gtest_main",
         "@libtorch//:torch",
-        "@stb//:stb_image",
-        "@stb//:stb_image_write",
     ],
 )

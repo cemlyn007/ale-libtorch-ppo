@@ -1,5 +1,6 @@
 #include "ai/ppo.h"
 #include "ai/rollout.h"
+#include "ai/vision.h"
 #include "stb_image.h"
 #include "stb_image_write.h"
 #include "tensorboard_logger.h"
@@ -61,15 +62,7 @@ struct NetworkImpl : torch::nn::Module {
     }
     {
       torch::NoGradGuard no_grad;
-      auto batch_size = x.size(0);
-      auto frame_stack = x.size(1);
-      x = x.reshape({x.size(0) * x.size(1), 1, x.size(2), x.size(3)});
-      x = torch::nn::functional::interpolate(
-          x, torch::nn::functional::InterpolateFuncOptions()
-                 .size(std::vector<int64_t>({84, 84}))
-                 .mode(torch::kBilinear)
-                 .align_corners(false));
-      x = x.reshape({batch_size, frame_stack, 84, 84});
+      x = ai::vision::resize_frame_stacked_grayscale_images(x);
       x = x.to(torch::kFloat32) / 255.0;
     }
     x = sequential->forward(x);

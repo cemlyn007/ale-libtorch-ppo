@@ -86,6 +86,18 @@ struct Metrics {
 
 void log_data(TensorBoardLogger &logger, const ai::rollout::Log &log,
               const Metrics &metrics) {
+  if (!log.episode_returns.empty()) {
+    float mean_return = std::accumulate(log.episode_returns.begin(),
+                                        log.episode_returns.end(), 0.0f) /
+                        log.episode_returns.size();
+    float mean_length = std::accumulate(log.episode_lengths.begin(),
+                                        log.episode_lengths.end(), 0.0f) /
+                        log.episode_lengths.size();
+    logger.add_scalar("mean_episode_return", log.steps, mean_return);
+    logger.add_scalar("mean_episode_length", log.steps, mean_length);
+    logger.add_histogram("episode_returns", log.steps, log.episode_returns);
+    logger.add_histogram("episode_lengths", log.steps, log.episode_lengths);
+  }
   logger.add_scalar("mean_clipped_gradient", log.steps,
                     metrics.clipped_gradients.mean().item<float>());
   logger.add_scalar("mean_loss", log.steps, metrics.loss.mean().item<float>());
@@ -252,26 +264,12 @@ int main(int argc, char **argv) {
     std::cout << "Rollout " << i + 1 << " of " << config.num_rollouts
               << std::endl;
     {
+      network->eval();
       torch::NoGradGuard no_grad;
       result = rollout.rollout();
     }
     auto batch = result.batch;
     auto log = result.log;
-
-    // Display episode returns and lengths
-    if (!log.episode_returns.empty()) {
-      float mean_return = std::accumulate(log.episode_returns.begin(),
-                                          log.episode_returns.end(), 0.0f) /
-                          log.episode_returns.size();
-      float mean_length = std::accumulate(log.episode_lengths.begin(),
-                                          log.episode_lengths.end(), 0.0f) /
-                          log.episode_lengths.size();
-      // Log to tensorboard
-      logger.add_scalar("mean_episode_return", log.steps, mean_return);
-      logger.add_scalar("mean_episode_length", log.steps, mean_length);
-      logger.add_histogram("episode_returns", log.steps, log.episode_returns);
-      logger.add_histogram("episode_lengths", log.steps, log.episode_lengths);
-    }
 
     auto observations = batch.observations.reshape(
         {-1, batch.observations.size(2), batch.observations.size(3),
@@ -288,6 +286,7 @@ int main(int argc, char **argv) {
           "Batch size is not divisible by mini-batch size");
     }
 
+    network->train();
     for (long j = 0; j < config.num_epochs; j++) {
       torch::randperm_out(indices, observations.size(0));
       for (long k = 0; k < config.num_mini_batches; k++) {
@@ -324,6 +323,7 @@ int main(int argc, char **argv) {
         metrics.advantages.index_put_(indices, mini_advantages);
         metrics.returns.index_put_(indices, mini_returns);
         metrics.masks.index_put_(indices, mini_masks);
+        metrics.clipped_gradients.index_put_(indices, clipped_gradient);
       }
     }
     log_data(logger, log, metrics);

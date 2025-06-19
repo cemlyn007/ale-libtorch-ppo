@@ -1,8 +1,7 @@
 #include "ai/ppo.h"
 #include "ai/rollout.h"
+#include "ai/video_recorder.h"
 #include "ai/vision.h"
-#include "stb_image.h"
-#include "stb_image_write.h"
 #include "tensorboard_logger.h"
 #include <ale/ale_interface.hpp>
 #include <ale/version.hpp>
@@ -12,7 +11,7 @@
 #include <torch/torch.h>
 
 struct Config {
-  size_t total_environments = 8;
+  size_t total_environments = 512;
   size_t hidden_size = 128;
   size_t action_size = 4;
   size_t horizon = 128;
@@ -21,10 +20,10 @@ struct Config {
   double learning_rate = 2.5e-4;
   double clip_param = 0.2;
   double value_loss_coef = 0.5;
-  double entropy_coef = 0.01;
+  double entropy_coef = 0.001;
   long num_epochs = 4;
-  long mini_batch_size = 256;
-  long num_mini_batches = 4;  // num_mini_batches = horizon / mini_batch_size
+  long mini_batch_size = 2048;
+  long num_mini_batches = 32; // num_mini_batches = horizon / mini_batch_size
   float gae_discount = 0.99f; // Discount factor for rewards
   float gae_lambda = 0.95f;   // GAE lambda for advantage estimation
   float max_gradient_norm = 0.5f; // Maximum norm for gradient clipping
@@ -143,7 +142,7 @@ int main(int argc, char **argv) {
 
   // For writing the images
   int64_t png_episode = -1;
-  int64_t frame_number = 0;
+  bool recording = false;
   auto png_subfolder =
       png_path /
       std::to_string(
@@ -152,6 +151,8 @@ int main(int argc, char **argv) {
   auto timestamp = std::chrono::system_clock::now().time_since_epoch().count();
   logger_path =
       logger_path.replace_extension("tfevents." + std::to_string(timestamp));
+  auto recorder =
+      ai::video_recorder::VideoRecorder(png_subfolder, 1, 160, 210, 30);
 
   TensorBoardLogger logger(logger_path);
   int64_t action_size = 4;
@@ -338,40 +339,21 @@ int main(int argc, char **argv) {
         batch.observations.index({0, torch::indexing::Slice(), 0})
             .to(torch::kCPU);
     auto masks = batch.masks[0].to(torch::kCPU);
-    static int width = 160, height = 210, channels = 1;
     for (size_t frame = 0; frame < config.horizon; ++frame) {
       bool new_episode = !masks[frame].item<bool>();
       if (new_episode) {
-        frame_number = 0;
         ++png_episode;
       }
       if (png_episode % config.log_episode_frequency == 0) {
         if (new_episode) {
-          if (std::filesystem::exists(png_subfolder)) {
-            std::string cmd =
-                "ffmpeg -y -framerate 30 -i \"" + png_subfolder.string() +
-                "/%d.png\" -c:v libx264 -pix_fmt yuv420p \"" +
-                (png_path / (std::to_string(png_episode) + ".mp4")).string() +
-                "\"";
-            if (std::system(cmd.c_str()) != 0) {
-              std::cerr << "Error occurred while creating video: " << cmd
-                        << std::endl;
-            }
+          if (recording) {
+            auto video_path = png_path / (std::to_string(png_episode) + ".mp4");
+            recorder.complete(video_path);
           }
-          png_subfolder =
-              png_path /
-              std::to_string(
-                  std::chrono::system_clock::now().time_since_epoch().count());
-          if (!std::filesystem::exists(png_subfolder)) {
-            std::filesystem::create_directories(png_subfolder);
-          }
-          frame_number = 0;
         }
         const auto &observation = observations[frame];
-        auto path = png_subfolder / (std::to_string(frame_number) + ".png");
-        stbi_write_png(path.c_str(), width, height, channels,
-                       observation.data_ptr<uint8_t>(), width * channels);
-        ++frame_number;
+        recorder.add(observation.data_ptr<uint8_t>());
+        recording = true;
       }
     }
   }

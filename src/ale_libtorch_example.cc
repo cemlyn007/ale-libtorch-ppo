@@ -13,14 +13,14 @@
 struct Config {
   size_t total_environments = 512;
   size_t hidden_size = 128;
-  size_t action_size = 4;
+  const size_t action_size = 4;
   size_t horizon = 128;
   size_t max_steps = 108000;
   size_t frame_stack = 4;
   double learning_rate = 2.5e-4;
   double clip_param = 0.2;
   double value_loss_coef = 0.5;
-  double entropy_coef = 0.0005;
+  double entropy_coef = 0.001;
   long num_epochs = 4;
   long mini_batch_size = 2048;
   long num_mini_batches = 32; // num_mini_batches = horizon / mini_batch_size
@@ -127,6 +127,29 @@ void log_data(TensorBoardLogger &logger, const ai::rollout::Log &log,
                        gather(metrics.returns, metrics.masks));
 }
 
+void record(const std::filesystem::path &video_path, int64_t &episode,
+            bool &recording, ai::video_recorder::VideoRecorder &recorder,
+            ai::buffer::Batch &batch) {
+  auto observations = batch.observations.index({0, torch::indexing::Slice(), 0})
+                          .to(torch::kCPU);
+  auto masks = batch.masks[0].to(torch::kCPU);
+  for (size_t frame = 0; frame < config.horizon; ++frame) {
+    bool new_episode = !masks[frame].item<bool>();
+    if (new_episode) {
+      ++episode;
+    }
+    if (episode % config.log_episode_frequency == 0) {
+      if (new_episode && recording) {
+        auto path = video_path / (std::to_string(episode) + ".mp4");
+        recorder.complete(path);
+      }
+      const auto &observation = observations[frame];
+      recorder.add(observation.data_ptr<uint8_t>());
+      recording = true;
+    }
+  }
+}
+
 struct ForwardResult {
   torch::Tensor logits;
   torch::Tensor value;
@@ -199,6 +222,72 @@ compute_loss(Network &network, const torch::Tensor &observations,
                            entropy_coef);
 }
 
+void mini_batch_update(torch::Device &device, Network &network,
+                       torch::optim::Adam &optimizer, Metrics &metrics,
+                       const torch::Tensor &indices,
+                       const ai::buffer::Batch &batch, long j, long k) {
+  {
+    auto start = k * config.mini_batch_size;
+    auto end = start + config.mini_batch_size;
+    auto mini_indices = indices.slice(0, start, end);
+
+    torch::Tensor mini_observations =
+        batch.observations.index_select(0, mini_indices);
+    torch::Tensor mini_actions = batch.actions.index_select(0, mini_indices);
+    torch::Tensor mini_advantages =
+        batch.advantages.index_select(0, mini_indices);
+    torch::Tensor mini_logits = batch.logits.index_select(0, mini_indices);
+    torch::Tensor mini_returns = batch.returns.index_select(0, mini_indices);
+    torch::Tensor mini_masks = batch.masks.index_select(0, mini_indices);
+
+    auto ppo_metrics =
+        compute_loss(network, mini_observations, mini_actions, mini_advantages,
+                     mini_logits, mini_returns, mini_masks, config.clip_param,
+                     config.value_loss_coef, config.entropy_coef);
+    optimizer.zero_grad();
+    ppo_metrics.loss.backward();
+    auto clipped_gradient = torch::nn::utils::clip_grad_norm_(
+        network->parameters(), config.max_gradient_norm, 2.0, true);
+    optimizer.step();
+
+    const torch::indexing::TensorIndex indices({{j, k}});
+    metrics.loss.index_put_(indices, ppo_metrics.loss.reshape({1}));
+    metrics.clipped_losses.index_put_(indices, ppo_metrics.clipped_losses);
+    metrics.value_losses.index_put_(indices, ppo_metrics.value_losses);
+    metrics.entropies.index_put_(indices, ppo_metrics.entropies);
+    metrics.ratio.index_put_(indices, ppo_metrics.ratio);
+    metrics.total_losses.index_put_(indices, ppo_metrics.total_losses);
+    metrics.advantages.index_put_(indices, mini_advantages);
+    metrics.returns.index_put_(indices, mini_returns);
+    metrics.masks.index_put_(indices, mini_masks);
+    metrics.clipped_gradients.index_put_(indices, clipped_gradient);
+  }
+}
+
+void train(torch::Device &device, Network &network,
+           torch::optim::Adam &optimizer, Metrics &metrics,
+           torch::Tensor &indices, ai::buffer::Batch &batch) {
+  {
+    network->train();
+    auto observations = batch.observations.view({-1, batch.observations.size(2),
+                                                 batch.observations.size(3),
+                                                 batch.observations.size(4)});
+    auto actions = batch.actions.ravel();
+    auto advantages = batch.advantages.ravel();
+    auto logits = batch.logits.view({-1, batch.logits.size(2)});
+    auto returns = batch.returns.ravel();
+    auto masks = batch.masks.ravel();
+    auto batch = ai::buffer::Batch(observations, actions, advantages, logits,
+                                   returns, masks);
+    for (long j = 0; j < config.num_epochs; j++) {
+      torch::randperm_out(indices, observations.size(0));
+      for (long k = 0; k < config.num_mini_batches; k++)
+        mini_batch_update(device, network, optimizer, metrics, indices, batch,
+                          j, k);
+    }
+  }
+}
+
 int main(int argc, char **argv) {
   const auto rom_path = argv[1];
   const auto logger_path = std::filesystem::path(argv[2]).replace_extension(
@@ -228,8 +317,7 @@ int main(int argc, char **argv) {
       ai::video_recorder::VideoRecorder(video_path, 1, 160, 210, 30);
 
   TensorBoardLogger logger(logger_path);
-  int64_t action_size = 4;
-  Network network(config.hidden_size, action_size);
+  Network network(config.hidden_size, config.action_size);
   initialize_weights(*network);
   network->to(device);
   torch::optim::Adam optimizer(network->parameters(),
@@ -237,117 +325,35 @@ int main(int argc, char **argv) {
   ai::rollout::Rollout rollout(
       std::filesystem::path(rom_path), config.total_environments,
       config.horizon, config.max_steps, config.frame_stack,
-      [&network, &device,
-       &action_size](const torch::Tensor &obs) -> ai::rollout::ActionResult {
+      [&network, &device, action_size = config.action_size](
+          const torch::Tensor &obs) -> ai::rollout::ActionResult {
         auto observations = device.is_cuda() ? obs.to(torch::kFloat32) : obs;
         auto output = network->forward(observations.to(device));
         auto logits = output.logits;
         auto probabilities = torch::nn::functional::softmax(logits, -1);
         auto actions = torch::multinomial(probabilities, 1, true);
-        return {actions.ravel(), logits.reshape({-1, action_size}),
+        return {actions.ravel(),
+                logits.reshape({-1, static_cast<long>(action_size)}),
                 output.value.ravel()};
       },
       config.gae_discount, config.gae_lambda, device);
 
-  ai::rollout::RolloutResult result;
-  auto clipped_gradients =
-      torch::empty({config.num_epochs, config.num_mini_batches});
-
-  Metrics metrics(config, device);
-
-  torch::Tensor mini_observations, mini_actions, mini_advantages, mini_logits,
-      mini_returns, mini_masks;
   torch::Tensor indices =
       torch::empty(config.mini_batch_size * config.num_mini_batches,
                    torch::TensorOptions().dtype(torch::kLong).device(device));
+  Metrics metrics(config, device);
   for (size_t i = 0; i < config.num_rollouts; i++) {
     std::cout << "Rollout " << i + 1 << " of " << config.num_rollouts
               << std::endl;
+    ai::rollout::RolloutResult result;
     {
       network->eval();
       torch::NoGradGuard no_grad;
       result = rollout.rollout();
     }
-    auto batch = result.batch;
-    auto log = result.log;
-
-    auto observations = batch.observations.reshape(
-        {-1, batch.observations.size(2), batch.observations.size(3),
-         batch.observations.size(4)});
-    auto actions = batch.actions.ravel();
-    auto advantages = batch.advantages.ravel();
-    auto logits = batch.logits.reshape({-1, batch.logits.size(2)});
-    auto returns = batch.returns.ravel();
-    auto masks = batch.masks.ravel();
-
-    if (observations.size(0) !=
-        config.mini_batch_size * config.num_mini_batches) {
-      throw std::runtime_error(
-          "Batch size is not divisible by mini-batch size");
-    }
-
-    network->train();
-    for (long j = 0; j < config.num_epochs; j++) {
-      torch::randperm_out(indices, observations.size(0));
-      for (long k = 0; k < config.num_mini_batches; k++) {
-        auto start = k * config.mini_batch_size;
-        auto end = start + config.mini_batch_size;
-        auto mini_indices = indices.slice(0, start, end);
-
-        mini_observations =
-            observations.index_select(0, mini_indices).to(device);
-        mini_actions = actions.index_select(0, mini_indices).to(device);
-        mini_advantages = advantages.index_select(0, mini_indices).to(device);
-        mini_logits = logits.index_select(0, mini_indices).to(device);
-        mini_returns = returns.index_select(0, mini_indices).to(device);
-        mini_masks = masks.index_select(0, mini_indices).to(device);
-
-        auto ppo_metrics = compute_loss(
-            network, mini_observations, mini_actions, mini_advantages,
-            mini_logits, mini_returns, mini_masks, config.clip_param,
-            config.value_loss_coef, config.entropy_coef);
-        optimizer.zero_grad();
-        ppo_metrics.loss.backward();
-        auto clipped_gradient = torch::nn::utils::clip_grad_norm_(
-            network->parameters(), config.max_gradient_norm, 2.0, true);
-        optimizer.step();
-
-        const torch::indexing::TensorIndex indices({{j, k}});
-        clipped_gradients.index_put_(indices, clipped_gradient);
-        metrics.loss.index_put_(indices, ppo_metrics.loss.reshape({1}));
-        metrics.clipped_losses.index_put_(indices, ppo_metrics.clipped_losses);
-        metrics.value_losses.index_put_(indices, ppo_metrics.value_losses);
-        metrics.entropies.index_put_(indices, ppo_metrics.entropies);
-        metrics.ratio.index_put_(indices, ppo_metrics.ratio);
-        metrics.total_losses.index_put_(indices, ppo_metrics.total_losses);
-        metrics.advantages.index_put_(indices, mini_advantages);
-        metrics.returns.index_put_(indices, mini_returns);
-        metrics.masks.index_put_(indices, mini_masks);
-        metrics.clipped_gradients.index_put_(indices, clipped_gradient);
-      }
-    }
-    log_data(logger, log, metrics);
-    {
-      auto observations =
-          batch.observations.index({0, torch::indexing::Slice(), 0})
-              .to(torch::kCPU);
-      auto masks = batch.masks[0].to(torch::kCPU);
-      for (size_t frame = 0; frame < config.horizon; ++frame) {
-        bool new_episode = !masks[frame].item<bool>();
-        if (new_episode) {
-          ++episode;
-        }
-        if (episode % config.log_episode_frequency == 0) {
-          if (new_episode && recording) {
-            auto path = video_path / (std::to_string(episode) + ".mp4");
-            recorder.complete(path);
-          }
-          const auto &observation = observations[frame];
-          recorder.add(observation.data_ptr<uint8_t>());
-          recording = true;
-        }
-      }
-    }
+    train(device, network, optimizer, metrics, indices, result.batch);
+    log_data(logger, result.log, metrics);
+    record(video_path, episode, recording, recorder, result.batch);
   }
   std::cout << "Success" << std::endl;
   return 0;

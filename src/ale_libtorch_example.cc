@@ -11,7 +11,7 @@
 #include <torch/torch.h>
 
 struct Config {
-  size_t total_environments = 8;
+  size_t total_environments = 512;
   size_t hidden_size = 128;
   size_t action_size = 4;
   size_t horizon = 128;
@@ -20,10 +20,10 @@ struct Config {
   double learning_rate = 2.5e-4;
   double clip_param = 0.2;
   double value_loss_coef = 0.5;
-  double entropy_coef = 0.01;
+  double entropy_coef = 0.0005;
   long num_epochs = 4;
-  long mini_batch_size = 256;
-  long num_mini_batches = 4;  // num_mini_batches = horizon / mini_batch_size
+  long mini_batch_size = 2048;
+  long num_mini_batches = 32; // num_mini_batches = horizon / mini_batch_size
   float gae_discount = 0.99f; // Discount factor for rewards
   float gae_lambda = 0.95f;   // GAE lambda for advantage estimation
   float max_gradient_norm = 0.5f; // Maximum norm for gradient clipping
@@ -69,27 +69,13 @@ struct Metrics {
     loss = torch::empty(
         {config.num_epochs, config.num_mini_batches, config.mini_batch_size},
         options);
-    clipped_losses = torch::empty(
-        {config.num_epochs, config.num_mini_batches, config.mini_batch_size},
-        options);
-    value_losses = torch::empty(
-        {config.num_epochs, config.num_mini_batches, config.mini_batch_size},
-        options);
-    entropies = torch::empty(
-        {config.num_epochs, config.num_mini_batches, config.mini_batch_size},
-        options);
-    ratio = torch::empty(
-        {config.num_epochs, config.num_mini_batches, config.mini_batch_size},
-        options);
-    total_losses = torch::empty(
-        {config.num_epochs, config.num_mini_batches, config.mini_batch_size},
-        options);
-    advantages = torch::empty(
-        {config.num_epochs, config.num_mini_batches, config.mini_batch_size},
-        options);
-    returns = torch::empty(
-        {config.num_epochs, config.num_mini_batches, config.mini_batch_size},
-        options);
+    clipped_losses = torch::empty_like(loss);
+    value_losses = torch::empty_like(loss);
+    entropies = torch::empty_like(loss);
+    ratio = torch::empty_like(loss);
+    total_losses = torch::empty_like(loss);
+    advantages = torch::empty_like(loss);
+    returns = torch::empty_like(loss);
     masks = torch::empty(
         {config.num_epochs, config.num_mini_batches, config.mini_batch_size},
         options.dtype(torch::kBool));
@@ -152,11 +138,11 @@ struct NetworkImpl : torch::nn::Module {
   }
 
   ForwardResult forward(torch::Tensor x) {
-    if (x.device().is_cuda()) {
-      x = x.to(torch::kFloat32);
-    }
     {
       torch::NoGradGuard no_grad;
+      if (x.device().is_cuda()) {
+        x = x.to(torch::kFloat32);
+      }
       x = ai::vision::resize_frame_stacked_grayscale_images(x);
       x = x.to(torch::kFloat32) / 255.0;
     }
@@ -207,7 +193,7 @@ int main(int argc, char **argv) {
       "tfevents." +
       std::to_string(
           std::chrono::system_clock::now().time_since_epoch().count()));
-  const auto png_path = std::filesystem::path(argv[3]);
+  const auto video_path = std::filesystem::path(argv[3]);
   torch::Device device(torch::kCPU);
   if (torch::cuda::is_available()) {
     std::cout << "CUDA is available! Training on GPU." << std::endl;
@@ -219,17 +205,15 @@ int main(int argc, char **argv) {
   if (!std::filesystem::exists(logger_path.parent_path())) {
     std::filesystem::create_directories(logger_path.parent_path());
   }
+  if (!std::filesystem::exists(video_path)) {
+    std::filesystem::create_directories(video_path);
+  }
 
   // For writing the images
-  int64_t png_episode = -1;
+  int64_t episode = -1;
   bool recording = false;
-  auto png_subfolder =
-      png_path /
-      std::to_string(
-          std::chrono::system_clock::now().time_since_epoch().count());
-
   auto recorder =
-      ai::video_recorder::VideoRecorder(png_subfolder, 1, 160, 210, 30);
+      ai::video_recorder::VideoRecorder(video_path, 1, 160, 210, 30);
 
   TensorBoardLogger logger(logger_path);
   int64_t action_size = 4;
@@ -259,8 +243,6 @@ int main(int argc, char **argv) {
 
   Metrics metrics(config, device);
 
-  torch::Tensor batch_observations, batch_actions, batch_advantages,
-      batch_logits, batch_returns, batch_masks;
   torch::Tensor mini_observations, mini_actions, mini_advantages, mini_logits,
       mini_returns, mini_masks;
   torch::Tensor indices =
@@ -298,7 +280,7 @@ int main(int argc, char **argv) {
     auto advantages = batch.advantages.ravel();
     auto logits = batch.logits.reshape({-1, batch.logits.size(2)});
     auto returns = batch.returns.ravel();
-    auto batch_masks = batch.masks.ravel();
+    auto masks = batch.masks.ravel();
 
     if (observations.size(0) !=
         config.mini_batch_size * config.num_mini_batches) {
@@ -313,16 +295,13 @@ int main(int argc, char **argv) {
         auto end = start + config.mini_batch_size;
         auto mini_indices = indices.slice(0, start, end);
 
-        {
-          torch::NoGradGuard no_grad;
-          mini_observations =
-              observations.index_select(0, mini_indices).to(device);
-          mini_actions = actions.index_select(0, mini_indices).to(device);
-          mini_advantages = advantages.index_select(0, mini_indices).to(device);
-          mini_logits = logits.index_select(0, mini_indices).to(device);
-          mini_returns = returns.index_select(0, mini_indices).to(device);
-          mini_masks = batch_masks.index_select(0, mini_indices).to(device);
-        }
+        mini_observations =
+            observations.index_select(0, mini_indices).to(device);
+        mini_actions = actions.index_select(0, mini_indices).to(device);
+        mini_advantages = advantages.index_select(0, mini_indices).to(device);
+        mini_logits = logits.index_select(0, mini_indices).to(device);
+        mini_returns = returns.index_select(0, mini_indices).to(device);
+        mini_masks = masks.index_select(0, mini_indices).to(device);
 
         auto ppo_metrics = compute_loss(
             network, mini_observations, mini_actions, mini_advantages,
@@ -347,9 +326,7 @@ int main(int argc, char **argv) {
         metrics.masks.index_put_(indices, mini_masks);
       }
     }
-
     log_data(logger, log, metrics);
-
     {
       auto observations =
           batch.observations.index({0, torch::indexing::Slice(), 0})
@@ -358,15 +335,12 @@ int main(int argc, char **argv) {
       for (size_t frame = 0; frame < config.horizon; ++frame) {
         bool new_episode = !masks[frame].item<bool>();
         if (new_episode) {
-          ++png_episode;
+          ++episode;
         }
-        if (png_episode % config.log_episode_frequency == 0) {
-          if (new_episode) {
-            if (recording) {
-              auto video_path =
-                  png_path / (std::to_string(png_episode) + ".mp4");
-              recorder.complete(video_path);
-            }
+        if (episode % config.log_episode_frequency == 0) {
+          if (new_episode && recording) {
+            auto path = video_path / (std::to_string(episode) + ".mp4");
+            recorder.complete(path);
           }
           const auto &observation = observations[frame];
           recorder.add(observation.data_ptr<uint8_t>());

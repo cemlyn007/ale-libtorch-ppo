@@ -33,6 +33,15 @@ struct Config {
 
 static const Config config = Config();
 
+struct Batch {
+  torch::Tensor observations;
+  torch::Tensor actions;
+  torch::Tensor logits;
+  torch::Tensor advantages;
+  torch::Tensor returns;
+  torch::Tensor masks;
+};
+
 float mean(const torch::Tensor &tensor, const torch::Tensor &mask) {
   auto masked_tensor = tensor.masked_select(mask);
   return masked_tensor.mean().item<float>();
@@ -224,12 +233,12 @@ compute_loss(Network &network, const torch::Tensor &observations,
 
 void mini_batch_update(torch::Device &device, Network &network,
                        torch::optim::Adam &optimizer, Metrics &metrics,
-                       const torch::Tensor &indices,
-                       const ai::buffer::Batch &batch, long j, long k) {
+                       const torch::Tensor &indices, const Batch &batch, long j,
+                       long k) {
   {
     auto start = k * config.mini_batch_size;
     auto end = start + config.mini_batch_size;
-    auto mini_indices = indices.slice(0, start, end);
+    const auto &mini_indices = indices.slice(0, start, end);
 
     torch::Tensor mini_observations =
         batch.observations.index_select(0, mini_indices);
@@ -277,8 +286,8 @@ void train(torch::Device &device, Network &network,
     auto logits = batch.logits.view({-1, batch.logits.size(2)});
     auto returns = batch.returns.ravel();
     auto masks = batch.masks.ravel();
-    auto batch = ai::buffer::Batch(observations, actions, advantages, logits,
-                                   returns, masks);
+    auto batch =
+        Batch(observations, actions, logits, advantages, returns, masks);
     for (long j = 0; j < config.num_epochs; j++) {
       torch::randperm_out(indices, observations.size(0));
       for (long k = 0; k < config.num_mini_batches; k++)

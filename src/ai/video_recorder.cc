@@ -9,7 +9,7 @@ VideoRecorder::VideoRecorder(const std::filesystem::path &video_path,
                              size_t channels, size_t width, size_t height,
                              size_t fps)
     : video_path_(video_path), channels_(channels), width_(width),
-      height_(height), fps_(fps), frame_index_(0) {}
+      height_(height), fps_(fps) {}
 
 void VideoRecorder::add(const unsigned char *data) {
   int length;
@@ -29,7 +29,7 @@ void VideoRecorder::complete(std::filesystem::path &path) {
     throw std::runtime_error("No frames to write to video");
   }
   std::string command = "ffmpeg -framerate " + std::to_string(fps_) +
-                        " -f image2pipe -c:v png -i - -c:v libx264 " +
+                        " -f image2pipe -c:v png -i - -c:v libx264 -y " +
                         path.string();
   auto stream = popen(command.data(), "w");
   if (!stream) {
@@ -37,6 +37,7 @@ void VideoRecorder::complete(std::filesystem::path &path) {
   }
   fwrite(frames_.data(), sizeof(unsigned char), frames_.size(), stream);
   pclose(stream);
+  frames_.clear();
 }
 
 } // namespace ai::video_recorder

@@ -11,7 +11,7 @@
 #include <torch/torch.h>
 
 struct Config {
-  size_t total_environments = 512;
+  size_t total_environments = 8;
   size_t hidden_size = 128;
   size_t action_size = 4;
   size_t horizon = 128;
@@ -20,10 +20,10 @@ struct Config {
   double learning_rate = 2.5e-4;
   double clip_param = 0.2;
   double value_loss_coef = 0.5;
-  double entropy_coef = 0.001;
+  double entropy_coef = 0.01;
   long num_epochs = 4;
-  long mini_batch_size = 2048;
-  long num_mini_batches = 32; // num_mini_batches = horizon / mini_batch_size
+  long mini_batch_size = 256;
+  long num_mini_batches = 4;  // num_mini_batches = horizon / mini_batch_size
   float gae_discount = 0.99f; // Discount factor for rewards
   float gae_lambda = 0.95f;   // GAE lambda for advantage estimation
   float max_gradient_norm = 0.5f; // Maximum norm for gradient clipping
@@ -32,6 +32,102 @@ struct Config {
 };
 
 static const Config config = Config();
+
+float mean(const torch::Tensor &tensor, const torch::Tensor &mask) {
+  auto masked_tensor = tensor.masked_select(mask);
+  return masked_tensor.mean().item<float>();
+}
+
+std::vector<float> gather(const torch::Tensor &tensor,
+                          const torch::Tensor &mask) {
+  auto t =
+      tensor.masked_select(mask).contiguous().to(torch::kCPU, torch::kFloat);
+  float *data_ptr = t.data_ptr<float>();
+  return std::vector<float>(data_ptr, data_ptr + t.numel());
+}
+
+std::vector<float> to_vector(const torch::Tensor &tensor) {
+  auto t = tensor.contiguous().to(torch::kCPU, torch::kFloat);
+  float *data_ptr = t.data_ptr<float>();
+  return std::vector<float>(data_ptr, data_ptr + t.numel());
+}
+
+struct Metrics {
+  torch::Tensor loss;
+  torch::Tensor clipped_losses;
+  torch::Tensor value_losses;
+  torch::Tensor entropies;
+  torch::Tensor ratio;
+  torch::Tensor total_losses;
+  torch::Tensor advantages;
+  torch::Tensor returns;
+  torch::Tensor masks;
+  torch::Tensor clipped_gradients;
+
+  Metrics(const Config &config, const torch::Device &device) {
+    auto options = torch::TensorOptions().device(device);
+    loss = torch::empty(
+        {config.num_epochs, config.num_mini_batches, config.mini_batch_size},
+        options);
+    clipped_losses = torch::empty(
+        {config.num_epochs, config.num_mini_batches, config.mini_batch_size},
+        options);
+    value_losses = torch::empty(
+        {config.num_epochs, config.num_mini_batches, config.mini_batch_size},
+        options);
+    entropies = torch::empty(
+        {config.num_epochs, config.num_mini_batches, config.mini_batch_size},
+        options);
+    ratio = torch::empty(
+        {config.num_epochs, config.num_mini_batches, config.mini_batch_size},
+        options);
+    total_losses = torch::empty(
+        {config.num_epochs, config.num_mini_batches, config.mini_batch_size},
+        options);
+    advantages = torch::empty(
+        {config.num_epochs, config.num_mini_batches, config.mini_batch_size},
+        options);
+    returns = torch::empty(
+        {config.num_epochs, config.num_mini_batches, config.mini_batch_size},
+        options);
+    masks = torch::empty(
+        {config.num_epochs, config.num_mini_batches, config.mini_batch_size},
+        options.dtype(torch::kBool));
+    clipped_gradients =
+        torch::empty({config.num_epochs, config.num_mini_batches});
+  }
+};
+
+void log_data(TensorBoardLogger &logger, const ai::rollout::Log &log,
+              const Metrics &metrics) {
+  logger.add_scalar("mean_clipped_gradient", log.steps,
+                    metrics.clipped_gradients.mean().item<float>());
+  logger.add_scalar("mean_loss", log.steps, metrics.loss.mean().item<float>());
+  logger.add_scalar("mean_clipped_loss", log.steps,
+                    mean(metrics.clipped_losses, metrics.masks));
+  logger.add_scalar("mean_value_loss", log.steps,
+                    mean(metrics.value_losses, metrics.masks));
+  logger.add_scalar("mean_entropy", log.steps,
+                    mean(metrics.entropies, metrics.masks));
+  logger.add_scalar("mean_ratio", log.steps,
+                    mean(metrics.ratio, metrics.masks));
+  logger.add_histogram("clipped_gradients", log.steps,
+                       to_vector(metrics.clipped_gradients));
+  logger.add_histogram("losses", log.steps,
+                       gather(metrics.total_losses, metrics.masks));
+  logger.add_histogram("clipped_losses", log.steps,
+                       gather(metrics.clipped_losses, metrics.masks));
+  logger.add_histogram("value_losses", log.steps,
+                       gather(metrics.value_losses, metrics.masks));
+  logger.add_histogram("entropies", log.steps,
+                       gather(metrics.entropies, metrics.masks));
+  logger.add_histogram("ratios", log.steps,
+                       gather(metrics.ratio, metrics.masks));
+  logger.add_histogram("advantages", log.steps,
+                       gather(metrics.advantages, metrics.masks));
+  logger.add_histogram("returns", log.steps,
+                       gather(metrics.returns, metrics.masks));
+}
 
 struct ForwardResult {
   torch::Tensor logits;
@@ -75,25 +171,6 @@ struct NetworkImpl : torch::nn::Module {
 };
 TORCH_MODULE(Network);
 
-float mean(const torch::Tensor &tensor, const torch::Tensor &mask) {
-  auto masked_tensor = tensor.masked_select(mask);
-  return masked_tensor.mean().item<float>();
-}
-
-std::vector<float> gather(const torch::Tensor &tensor,
-                          const torch::Tensor &mask) {
-  auto t =
-      tensor.masked_select(mask).contiguous().to(torch::kCPU, torch::kFloat);
-  float *data_ptr = t.data_ptr<float>();
-  return std::vector<float>(data_ptr, data_ptr + t.numel());
-}
-
-std::vector<float> to_vector(const torch::Tensor &tensor) {
-  auto t = tensor.contiguous().to(torch::kCPU, torch::kFloat);
-  float *data_ptr = t.data_ptr<float>();
-  return std::vector<float>(data_ptr, data_ptr + t.numel());
-}
-
 void initialize_weights(torch::nn::Module &module) {
   for (auto &submodule : module.children()) {
     if (auto linear = dynamic_cast<torch::nn::LinearImpl *>(submodule.get())) {
@@ -126,7 +203,10 @@ compute_loss(Network &network, const torch::Tensor &observations,
 
 int main(int argc, char **argv) {
   const auto rom_path = argv[1];
-  auto logger_path = std::filesystem::path(argv[2]);
+  const auto logger_path = std::filesystem::path(argv[2]).replace_extension(
+      "tfevents." +
+      std::to_string(
+          std::chrono::system_clock::now().time_since_epoch().count()));
   const auto png_path = std::filesystem::path(argv[3]);
   torch::Device device(torch::kCPU);
   if (torch::cuda::is_available()) {
@@ -148,9 +228,6 @@ int main(int argc, char **argv) {
       std::to_string(
           std::chrono::system_clock::now().time_since_epoch().count());
 
-  auto timestamp = std::chrono::system_clock::now().time_since_epoch().count();
-  logger_path =
-      logger_path.replace_extension("tfevents." + std::to_string(timestamp));
   auto recorder =
       ai::video_recorder::VideoRecorder(png_subfolder, 1, 160, 210, 30);
 
@@ -180,39 +257,12 @@ int main(int argc, char **argv) {
   auto clipped_gradients =
       torch::empty({config.num_epochs, config.num_mini_batches});
 
-  auto options = torch::TensorOptions().requires_grad(false).device(device);
-  auto metric_loss = torch::empty(
-      {config.num_epochs, config.num_mini_batches, config.mini_batch_size},
-      options);
-  auto metric_clipped_losses = torch::empty(
-      {config.num_epochs, config.num_mini_batches, config.mini_batch_size},
-      options);
-  auto metric_value_losses = torch::empty(
-      {config.num_epochs, config.num_mini_batches, config.mini_batch_size},
-      options);
-  auto metric_entropies = torch::empty(
-      {config.num_epochs, config.num_mini_batches, config.mini_batch_size},
-      options);
-  auto metric_ratio = torch::empty(
-      {config.num_epochs, config.num_mini_batches, config.mini_batch_size},
-      options);
-  auto metric_total_losses = torch::empty(
-      {config.num_epochs, config.num_mini_batches, config.mini_batch_size},
-      options);
-  auto metric_advantages = torch::empty(
-      {config.num_epochs, config.num_mini_batches, config.mini_batch_size},
-      options);
-  auto metric_returns = torch::empty(
-      {config.num_epochs, config.num_mini_batches, config.mini_batch_size},
-      options);
-
-  auto metric_masks = torch::empty(
-      {config.num_epochs, config.num_mini_batches, config.mini_batch_size},
-      options.dtype(torch::kBool));
+  Metrics metrics(config, device);
 
   torch::Tensor batch_observations, batch_actions, batch_advantages,
       batch_logits, batch_returns, batch_masks;
-  torch::Tensor observations, actions, advantages, logits, returns, masks;
+  torch::Tensor mini_observations, mini_actions, mini_advantages, mini_logits,
+      mini_returns, mini_masks;
   torch::Tensor indices =
       torch::empty(config.mini_batch_size * config.num_mini_batches,
                    torch::TensorOptions().dtype(torch::kLong).device(device));
@@ -241,119 +291,87 @@ int main(int argc, char **argv) {
       logger.add_histogram("episode_lengths", log.steps, log.episode_lengths);
     }
 
-    auto batch_observations = batch.observations.reshape(
+    auto observations = batch.observations.reshape(
         {-1, batch.observations.size(2), batch.observations.size(3),
          batch.observations.size(4)});
-    auto batch_actions = batch.actions.ravel();
-    auto batch_advantages = batch.advantages.ravel();
-    auto batch_logits = batch.logits.reshape({-1, batch.logits.size(2)});
-    auto batch_returns = batch.returns.ravel();
+    auto actions = batch.actions.ravel();
+    auto advantages = batch.advantages.ravel();
+    auto logits = batch.logits.reshape({-1, batch.logits.size(2)});
+    auto returns = batch.returns.ravel();
     auto batch_masks = batch.masks.ravel();
 
-    if (batch_observations.size(0) !=
+    if (observations.size(0) !=
         config.mini_batch_size * config.num_mini_batches) {
       throw std::runtime_error(
           "Batch size is not divisible by mini-batch size");
     }
 
     for (long j = 0; j < config.num_epochs; j++) {
-      torch::randperm_out(indices, batch_observations.size(0));
+      torch::randperm_out(indices, observations.size(0));
       for (long k = 0; k < config.num_mini_batches; k++) {
         auto start = k * config.mini_batch_size;
         auto end = start + config.mini_batch_size;
-        auto mini_batch_indices = indices.slice(0, start, end);
+        auto mini_indices = indices.slice(0, start, end);
 
         {
           torch::NoGradGuard no_grad;
-          observations =
-              batch_observations.index_select(0, mini_batch_indices).to(device);
-          actions =
-              batch_actions.index_select(0, mini_batch_indices).to(device);
-          advantages =
-              batch_advantages.index_select(0, mini_batch_indices).to(device);
-          logits = batch_logits.index_select(0, mini_batch_indices).to(device);
-          returns =
-              batch_returns.index_select(0, mini_batch_indices).to(device);
-          masks = batch_masks.index_select(0, mini_batch_indices).to(device);
+          mini_observations =
+              observations.index_select(0, mini_indices).to(device);
+          mini_actions = actions.index_select(0, mini_indices).to(device);
+          mini_advantages = advantages.index_select(0, mini_indices).to(device);
+          mini_logits = logits.index_select(0, mini_indices).to(device);
+          mini_returns = returns.index_select(0, mini_indices).to(device);
+          mini_masks = batch_masks.index_select(0, mini_indices).to(device);
         }
 
-        auto metrics = compute_loss(
-            network, observations, actions, advantages, logits, returns, masks,
-            config.clip_param, config.value_loss_coef, config.entropy_coef);
+        auto ppo_metrics = compute_loss(
+            network, mini_observations, mini_actions, mini_advantages,
+            mini_logits, mini_returns, mini_masks, config.clip_param,
+            config.value_loss_coef, config.entropy_coef);
         optimizer.zero_grad();
-        metrics.loss.backward();
+        ppo_metrics.loss.backward();
         auto clipped_gradient = torch::nn::utils::clip_grad_norm_(
             network->parameters(), config.max_gradient_norm, 2.0, true);
         optimizer.step();
 
-        clipped_gradients.index_put_({{j, k}}, clipped_gradient);
-        metric_loss.index_put_({{j, k}}, metrics.loss.reshape({1}));
-        metric_clipped_losses.index_put_({{j, k}}, metrics.clipped_losses);
-        metric_value_losses.index_put_({{j, k}}, metrics.value_losses);
-        metric_entropies.index_put_({{j, k}}, metrics.entropies);
-        metric_ratio.index_put_({{j, k}}, metrics.ratio);
-        metric_total_losses.index_put_({{j, k}}, metrics.total_losses);
-        metric_advantages.index_put_({{j, k}}, advantages);
-        metric_returns.index_put_({{j, k}}, returns);
-        metric_masks.index_put_({{j, k}}, masks);
+        const torch::indexing::TensorIndex indices({{j, k}});
+        clipped_gradients.index_put_(indices, clipped_gradient);
+        metrics.loss.index_put_(indices, ppo_metrics.loss.reshape({1}));
+        metrics.clipped_losses.index_put_(indices, ppo_metrics.clipped_losses);
+        metrics.value_losses.index_put_(indices, ppo_metrics.value_losses);
+        metrics.entropies.index_put_(indices, ppo_metrics.entropies);
+        metrics.ratio.index_put_(indices, ppo_metrics.ratio);
+        metrics.total_losses.index_put_(indices, ppo_metrics.total_losses);
+        metrics.advantages.index_put_(indices, mini_advantages);
+        metrics.returns.index_put_(indices, mini_returns);
+        metrics.masks.index_put_(indices, mini_masks);
       }
     }
 
-    logger.add_scalar("mean_clipped_gradient", log.steps,
-                      clipped_gradients.mean().item<float>());
-    logger.add_scalar("mean_loss", log.steps, metric_loss.mean().item<float>());
-    logger.add_scalar("mean_clipped_loss", log.steps,
-                      mean(metric_clipped_losses, metric_masks));
-    logger.add_scalar("mean_value_loss", log.steps,
-                      mean(metric_value_losses, metric_masks));
-    logger.add_scalar("mean_entropy", log.steps,
-                      mean(metric_entropies, metric_masks));
-    logger.add_scalar("mean_ratio", log.steps,
-                      mean(metric_ratio, metric_masks));
-    // Histogram
-    logger.add_histogram("actions", log.steps,
-                         gather(batch_actions, batch_masks));
-    logger.add_histogram(
-        "probabilities", log.steps,
-        gather(torch::nn::functional::softmax(
-                   batch_logits, torch::nn::functional::SoftmaxFuncOptions(-1)),
-               batch_masks.unsqueeze(1)));
-    logger.add_histogram("clipped_gradients", log.steps,
-                         to_vector(clipped_gradients));
-    logger.add_histogram("losses", log.steps,
-                         gather(metric_total_losses, metric_masks));
-    logger.add_histogram("clipped_losses", log.steps,
-                         gather(metric_clipped_losses, metric_masks));
-    logger.add_histogram("value_losses", log.steps,
-                         gather(metric_value_losses, metric_masks));
-    logger.add_histogram("entropies", log.steps,
-                         gather(metric_entropies, metric_masks));
-    logger.add_histogram("ratios", log.steps,
-                         gather(metric_ratio, metric_masks));
-    logger.add_histogram("advantages", log.steps,
-                         gather(metric_advantages, metric_masks));
-    logger.add_histogram("returns", log.steps,
-                         gather(metric_returns, metric_masks));
+    log_data(logger, log, metrics);
 
-    auto observations =
-        batch.observations.index({0, torch::indexing::Slice(), 0})
-            .to(torch::kCPU);
-    auto masks = batch.masks[0].to(torch::kCPU);
-    for (size_t frame = 0; frame < config.horizon; ++frame) {
-      bool new_episode = !masks[frame].item<bool>();
-      if (new_episode) {
-        ++png_episode;
-      }
-      if (png_episode % config.log_episode_frequency == 0) {
+    {
+      auto observations =
+          batch.observations.index({0, torch::indexing::Slice(), 0})
+              .to(torch::kCPU);
+      auto masks = batch.masks[0].to(torch::kCPU);
+      for (size_t frame = 0; frame < config.horizon; ++frame) {
+        bool new_episode = !masks[frame].item<bool>();
         if (new_episode) {
-          if (recording) {
-            auto video_path = png_path / (std::to_string(png_episode) + ".mp4");
-            recorder.complete(video_path);
-          }
+          ++png_episode;
         }
-        const auto &observation = observations[frame];
-        recorder.add(observation.data_ptr<uint8_t>());
-        recording = true;
+        if (png_episode % config.log_episode_frequency == 0) {
+          if (new_episode) {
+            if (recording) {
+              auto video_path =
+                  png_path / (std::to_string(png_episode) + ".mp4");
+              recorder.complete(video_path);
+            }
+          }
+          const auto &observation = observations[frame];
+          recorder.add(observation.data_ptr<uint8_t>());
+          recording = true;
+        }
       }
     }
   }

@@ -55,18 +55,21 @@ Rollout::Rollout(
   screen_width_ = ales_.back()->getScreen().width();
   screen_height_ = ales_.back()->getScreen().height();
 
-  const auto options =
-      torch::TensorOptions().device(torch::kCPU).pinned_memory(true);
-  const auto state_options = options.dtype(torch::kBool);
-  const auto reward_options = options.dtype(torch::kFloat32);
-  const auto observation_options = options.dtype(torch::kByte);
   observations_ = torch::zeros(
       {total_environments_, frame_stack_, screen_height_, screen_width_},
-      observation_options);
-  is_terminal_ = torch::zeros({total_environments_}, state_options);
-  is_truncated_ = torch::zeros({total_environments_}, state_options);
-  is_episode_start_ = torch::ones({total_environments_}, state_options);
-  rewards_ = torch::zeros({total_environments_}, reward_options);
+      torch::TensorOptions(torch::kByte).device(device_));
+  is_terminal_ =
+      torch::zeros({total_environments_},
+                   torch::TensorOptions(torch::kBool).device(device_));
+  is_truncated_ =
+      torch::zeros({total_environments_},
+                   torch::TensorOptions(torch::kBool).device(device_));
+  is_episode_start_ =
+      torch::ones({total_environments_},
+                  torch::TensorOptions(torch::kBool).device(device_));
+  rewards_ =
+      torch::zeros({total_environments_},
+                   torch::TensorOptions(torch::kFloat32).device(device_));
   episode_returns_.resize(total_environments_, 0.0f);
   episode_lengths_.resize(total_environments_, 0);
 }

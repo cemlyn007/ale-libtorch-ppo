@@ -17,7 +17,7 @@ Metrics ppo_loss(const torch::Tensor &logits, const torch::Tensor &old_logits,
   auto unclipped_losses = ratio * advantages;
   auto clamped_losses =
       torch::clamp(ratio, 1.0 - clip_param, 1.0 + clip_param) * advantages;
-  auto clipped_losses = -torch::min(unclipped_losses, clamped_losses);
+  auto clipped_losses = torch::max(-unclipped_losses, -clamped_losses);
   auto value_losses = 0.5 * torch::square(values - returns);
 
   auto entropies =

@@ -73,8 +73,10 @@ Batch Buffer::get(const torch::Tensor &next_values, float discount,
                truncations_, episode_starts_, discount, lambda);
   returns_.copy_(advantages_);
   returns_.add_(values_);
-  episode_starts_.logical_not_();
-  return {observations_, actions_, rewards_,    episode_starts_,
-          logits_,       values_,  advantages_, returns_};
+
+  Batch batch{
+      observations_, actions_, rewards_,    torch::logical_not(episode_starts_),
+      logits_,       values_,  advantages_, returns_};
+  return batch;
 }
 } // namespace ai::buffer

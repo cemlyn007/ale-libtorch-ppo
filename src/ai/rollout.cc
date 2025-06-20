@@ -8,7 +8,8 @@ Rollout::Rollout(
     std::filesystem::path rom_path, size_t total_environments, size_t horizon,
     size_t max_steps, size_t frame_stack,
     std::function<ActionResult(const torch::Tensor &)> action_selector,
-    float gae_discount, float gae_lambda, const torch::Device &device)
+    float gae_discount, float gae_lambda, const torch::Device &device,
+    size_t seed)
     : gae_discount_(gae_discount), gae_lambda_(gae_lambda), ales_(),
       rom_path_(rom_path), buffer_([&] {
         ale::ALEInterface ale;
@@ -49,7 +50,7 @@ Rollout::Rollout(
     ales_.back()->setBool("truncate_on_loss_of_life", true);
     ales_.back()->setInt("max_num_frames_per_episode", 108000);
     ales_.back()->setInt("frame_skip", 1);
-    ales_.back()->setInt("random_seed", i);
+    ales_.back()->setInt("random_seed", i + seed);
     ales_.back()->setFloat("repeat_action_probability", 0.0f);
     ales_.back()->loadROM(rom_path_);
     assert(ales_.back()->getInt("max_num_frames_per_episode") == 108000);

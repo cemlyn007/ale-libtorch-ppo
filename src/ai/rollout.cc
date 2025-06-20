@@ -23,8 +23,6 @@ Rollout::Rollout(
       frame_stack_(frame_stack), max_steps_(max_steps), is_terminal_(),
       is_truncated_(), is_episode_start_(), action_selector_(action_selector),
       device_(device) {
-
-  // TODO: Initialize vectors etc
   if (total_environments_ == 0) {
     throw std::invalid_argument("Total environments must be greater than 0.");
   }
@@ -53,9 +51,9 @@ Rollout::Rollout(
     ales_.back()->setFloat("repeat_action_probability", 0.0f);
     ales_.back()->loadROM(rom_path_);
     assert(ales_.back()->getInt("max_num_frames_per_episode") == 108000);
-    screen_width_ = ales_.back()->getScreen().width();
-    screen_height_ = ales_.back()->getScreen().height();
   }
+  screen_width_ = ales_.back()->getScreen().width();
+  screen_height_ = ales_.back()->getScreen().height();
 
   const auto options =
       torch::TensorOptions().device(torch::kCPU).pinned_memory(true);

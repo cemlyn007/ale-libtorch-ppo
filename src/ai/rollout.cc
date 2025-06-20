@@ -16,7 +16,7 @@ Rollout::Rollout(
         auto screen = ale.getScreen();
         return ai::buffer::Buffer(
             total_environments, horizon,
-            {frame_stack, screen.width(), screen.height()},
+            {frame_stack, screen.height(), screen.width()},
             ale.getMinimalActionSet().size(), device);
       }()),
       total_environments_(total_environments), horizon_(horizon),
@@ -58,7 +58,7 @@ Rollout::Rollout(
   }
 
   observations_ = torch::zeros(
-      {total_environments_, frame_stack_, screen_width_, screen_height_},
+      {total_environments_, frame_stack_, screen_height_, screen_width_},
       torch::TensorOptions(torch::kByte).device(device_));
   is_terminal_ =
       torch::zeros({total_environments_},
@@ -82,12 +82,12 @@ void Rollout::get_observations() {
         {torch::indexing::Slice(), frame_index},
         observations_.index({torch::indexing::Slice(), frame_index - 1}));
   }
-  std::vector<unsigned char> gray_scale(screen_width_ * screen_height_);
+  std::vector<unsigned char> gray_scale(screen_height_ * screen_width_);
   for (int64_t environment_index = 0; environment_index < total_environments_;
        ++environment_index) {
     ales_[environment_index]->getScreenGrayscale(gray_scale);
     auto frame = torch::from_blob(
-        gray_scale.data(), {screen_width_, screen_height_}, torch::kByte);
+        gray_scale.data(), {screen_height_, screen_width_}, torch::kByte);
     if (is_episode_start_[environment_index].item<bool>()) {
       for (int64_t frame_index = 0; frame_index < frame_stack_; ++frame_index) {
         observations_.index_put_({environment_index, frame_index}, frame);

@@ -29,4 +29,10 @@ clipped_surogate_objectives(const torch::Tensor &log_probabilities,
                             const torch::Tensor &actions,
                             const torch::Tensor &advantages, float clip_param);
 
+// Requires log probabilities.
+torch::Tensor compute_entropies(const torch::Tensor &);
+
+// Accepts unnormalized logits.
+torch::Tensor normalize_logits(const torch::Tensor &);
+
 } // namespace ai::ppo::losses

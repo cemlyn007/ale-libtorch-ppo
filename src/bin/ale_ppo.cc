@@ -232,7 +232,7 @@ compute_loss(Network &network, const torch::Tensor &observations,
 }
 
 void mini_batch_update(torch::Device &device, Network &network,
-                       torch::optim::Adam &optimizer, Metrics &metrics,
+                       torch::optim::Optimizer &optimizer, Metrics &metrics,
                        const torch::Tensor &indices, const Batch &batch, long j,
                        long k) {
   {
@@ -274,7 +274,7 @@ void mini_batch_update(torch::Device &device, Network &network,
 }
 
 void train(torch::Device &device, Network &network,
-           torch::optim::Adam &optimizer, Metrics &metrics,
+           torch::optim::Optimizer &optimizer, Metrics &metrics,
            torch::Tensor &indices, ai::buffer::Batch &batch) {
   {
     network->train();

@@ -228,7 +228,7 @@ void train_batch(torch::Device &device, Network &network,
   ai::ppo::train::Hyperparameters hp = {
       config.clip_param, config.value_loss_coef, config.entropy_coef,
       config.max_gradient_norm};
-  ai::ppo::train::train<Network>(device, network, optimizer, metrics, indices,
+  ai::ppo::train::train<Network>(network, optimizer, metrics, indices,
                                  other_batch, config.num_epochs,
                                  config.num_mini_batches, hp);
 }

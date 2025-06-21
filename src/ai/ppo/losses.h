@@ -28,7 +28,6 @@ Metrics compute(const torch::Tensor &log_probabilities,
 ClippedSurogateObjectivesResult
 clipped_surogate_objectives(const torch::Tensor &log_probabilities,
                             const torch::Tensor &log_old_probabilities,
-                            const torch::Tensor &actions,
                             const torch::Tensor &advantages, float clip_param);
 
 // Requires log probabilities.

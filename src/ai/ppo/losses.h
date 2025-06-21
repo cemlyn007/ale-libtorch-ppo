@@ -1,3 +1,4 @@
+#pragma once
 #include <torch/torch.h>
 
 namespace ai::ppo::losses {

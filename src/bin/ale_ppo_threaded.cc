@@ -1,4 +1,5 @@
 #include "ai/ppo/losses.h"
+#include "ai/ppo/train.h"
 #include "ai/rollout.h"
 #include "ai/video_recorder.h"
 #include "ai/vision.h"
@@ -20,9 +21,9 @@ struct Config {
   size_t max_steps;
   size_t frame_stack;
   double learning_rate;
-  double clip_param;
-  double value_loss_coef;
-  double entropy_coef;
+  float clip_param;
+  float value_loss_coef;
+  float entropy_coef;
   long num_epochs;
   long mini_batch_size;
   long num_mini_batches;
@@ -84,40 +85,8 @@ std::vector<float> to_vector(const torch::Tensor &tensor) {
   return std::vector<float>(data_ptr, data_ptr + t.numel());
 }
 
-struct Metrics {
-  torch::Tensor loss;
-  torch::Tensor clipped_losses;
-  torch::Tensor value_losses;
-  torch::Tensor entropies;
-  torch::Tensor ratio;
-  torch::Tensor total_losses;
-  torch::Tensor advantages;
-  torch::Tensor returns;
-  torch::Tensor masks;
-  torch::Tensor clipped_gradients;
-
-  Metrics(const Config &config, const torch::Device &device) {
-    auto options = torch::TensorOptions().device(device);
-    loss = torch::empty(
-        {config.num_epochs, config.num_mini_batches, config.mini_batch_size},
-        options);
-    clipped_losses = torch::empty_like(loss);
-    value_losses = torch::empty_like(loss);
-    entropies = torch::empty_like(loss);
-    ratio = torch::empty_like(loss);
-    total_losses = torch::empty_like(loss);
-    advantages = torch::empty_like(loss);
-    returns = torch::empty_like(loss);
-    masks = torch::empty(
-        {config.num_epochs, config.num_mini_batches, config.mini_batch_size},
-        options.dtype(torch::kBool));
-    clipped_gradients =
-        torch::empty({config.num_epochs, config.num_mini_batches});
-  }
-};
-
 void log_data(TensorBoardLogger &logger, const ai::rollout::Log &log,
-              const Metrics &metrics) {
+              const ai::ppo::train::Metrics &metrics) {
   if (!log.episode_returns.empty()) {
     float mean_return = std::accumulate(log.episode_returns.begin(),
                                         log.episode_returns.end(), 0.0f) /
@@ -182,11 +151,6 @@ void record(const std::filesystem::path &video_path, int64_t &episode,
   }
 }
 
-struct ForwardResult {
-  torch::Tensor logits;
-  torch::Tensor value;
-};
-
 struct NetworkImpl : torch::nn::Module {
   NetworkImpl(size_t hidden_size, size_t action_size)
       : sequential(
@@ -204,7 +168,12 @@ struct NetworkImpl : torch::nn::Module {
     register_module("value_head", value_head);
   }
 
-  ForwardResult forward(torch::Tensor x) {
+  struct OutputType {
+    torch::Tensor logits;
+    torch::Tensor value;
+  };
+
+  OutputType forward(torch::Tensor x) {
     {
       torch::NoGradGuard no_grad;
       if (x.device().is_cuda()) {
@@ -240,83 +209,28 @@ void initialize_weights(torch::nn::Module &module) {
   }
 }
 
-ai::ppo::losses::Metrics
-compute_loss(Network &network, const torch::Tensor &observations,
-             const torch::Tensor &actions, const torch::Tensor &advantages,
-             const torch::Tensor &old_logits, const torch::Tensor &returns,
-             const torch::Tensor &masks, float clip_param,
-             float value_loss_coef, float entropy_coef) {
-  auto output = network->forward(observations);
-  auto logits = output.logits;
-  auto values = output.value;
-  return ai::ppo::losses::compute(logits, old_logits, actions, advantages,
-                                  values, returns, masks, clip_param,
-                                  value_loss_coef, entropy_coef);
-}
+void train_batch(torch::Device &device, Network &network,
+                 torch::optim::Optimizer &optimizer,
+                 ai::ppo::train::Metrics &metrics, torch::Tensor &indices,
+                 ai::buffer::Batch &batch) {
+  network->train();
+  auto observations = batch.observations.view({-1, batch.observations.size(2),
+                                               batch.observations.size(3),
+                                               batch.observations.size(4)});
+  auto actions = batch.actions.ravel();
+  auto advantages = batch.advantages.ravel();
+  auto logits = batch.logits.view({-1, batch.logits.size(2)});
+  auto returns = batch.returns.ravel();
+  auto masks = batch.masks.ravel();
+  ai::ppo::train::Batch other_batch = {observations, actions, logits,
+                                       advantages,   returns, masks};
 
-void mini_batch_update(torch::Device &device, Network &network,
-                       torch::optim::Optimizer &optimizer, Metrics &metrics,
-                       const torch::Tensor &indices, const Batch &batch, long j,
-                       long k) {
-  {
-    auto start = k * config.mini_batch_size;
-    auto end = start + config.mini_batch_size;
-    const auto &mini_indices = indices.slice(0, start, end);
-
-    torch::Tensor mini_observations =
-        batch.observations.index_select(0, mini_indices);
-    torch::Tensor mini_actions = batch.actions.index_select(0, mini_indices);
-    torch::Tensor mini_advantages =
-        batch.advantages.index_select(0, mini_indices);
-    torch::Tensor mini_logits = batch.logits.index_select(0, mini_indices);
-    torch::Tensor mini_returns = batch.returns.index_select(0, mini_indices);
-    torch::Tensor mini_masks = batch.masks.index_select(0, mini_indices);
-
-    auto ppo_metrics =
-        compute_loss(network, mini_observations, mini_actions, mini_advantages,
-                     mini_logits, mini_returns, mini_masks, config.clip_param,
-                     config.value_loss_coef, config.entropy_coef);
-    optimizer.zero_grad();
-    ppo_metrics.loss.backward();
-    auto clipped_gradient = torch::nn::utils::clip_grad_norm_(
-        network->parameters(), config.max_gradient_norm, 2.0, true);
-    optimizer.step();
-
-    const torch::indexing::TensorIndex indices({{j, k}});
-    metrics.loss.index_put_(indices, ppo_metrics.loss.reshape({1}));
-    metrics.clipped_losses.index_put_(indices, ppo_metrics.clipped_losses);
-    metrics.value_losses.index_put_(indices, ppo_metrics.value_losses);
-    metrics.entropies.index_put_(indices, ppo_metrics.entropies);
-    metrics.ratio.index_put_(indices, ppo_metrics.ratio);
-    metrics.total_losses.index_put_(indices, ppo_metrics.total_losses);
-    metrics.advantages.index_put_(indices, mini_advantages);
-    metrics.returns.index_put_(indices, mini_returns);
-    metrics.masks.index_put_(indices, mini_masks);
-    metrics.clipped_gradients.index_put_(indices, clipped_gradient);
-  }
-}
-
-void train(torch::Device &device, Network &network,
-           torch::optim::Optimizer &optimizer, Metrics &metrics,
-           torch::Tensor &indices, ai::buffer::Batch &batch) {
-  {
-    network->train();
-    auto observations = batch.observations.view({-1, batch.observations.size(2),
-                                                 batch.observations.size(3),
-                                                 batch.observations.size(4)});
-    auto actions = batch.actions.ravel();
-    auto advantages = batch.advantages.ravel();
-    auto logits = batch.logits.view({-1, batch.logits.size(2)});
-    auto returns = batch.returns.ravel();
-    auto masks = batch.masks.ravel();
-    Batch batch(observations, actions, logits, advantages, returns, masks);
-    for (long j = 0; j < config.num_epochs; j++) {
-      torch::randperm_out(indices, observations.size(0));
-      for (long k = 0; k < config.num_mini_batches; k++)
-        mini_batch_update(device, network, optimizer, metrics, indices, batch,
-                          j, k);
-    }
-  }
+  ai::ppo::train::Hyperparameters hp = {
+      config.clip_param, config.value_loss_coef, config.entropy_coef,
+      config.max_gradient_norm};
+  ai::ppo::train::train<Network>(device, network, optimizer, metrics, indices,
+                                 other_batch, config.num_epochs,
+                                 config.num_mini_batches, hp);
 }
 
 // Note: The current implementation doesn't use locks for when training
@@ -385,7 +299,8 @@ int main(int argc, char **argv) {
   torch::Tensor indices =
       torch::empty(config.mini_batch_size * config.num_mini_batches,
                    torch::TensorOptions().dtype(torch::kLong).device(device));
-  Metrics metrics(config, device);
+  ai::ppo::train::Metrics metrics(config.num_epochs, config.num_mini_batches,
+                                  config.mini_batch_size, device);
   size_t log_steps = 0;
   std::vector<std::future<ai::rollout::RolloutResult>> futures(
       config.num_workers);
@@ -404,7 +319,7 @@ int main(int argc, char **argv) {
               << config.num_rollouts << std::endl;
 
     result = futures[index].get();
-    train(device, network, optimizer, metrics, indices, result.batch);
+    train_batch(device, network, optimizer, metrics, indices, result.batch);
     log_steps += config.total_environments * config.horizon;
     result.log.steps = log_steps;
     log_data(logger, result.log, metrics);

@@ -159,7 +159,7 @@ void record(const std::filesystem::path &video_path, int64_t &episode,
   }
 }
 
-struct ForwardResult {
+struct OutputType {
   torch::Tensor logits;
   torch::Tensor value;
 };
@@ -181,7 +181,7 @@ struct NetworkImpl : torch::nn::Module {
     register_module("value_head", value_head);
   }
 
-  ForwardResult forward(torch::Tensor x) {
+  OutputType forward(torch::Tensor x) {
     {
       torch::NoGradGuard no_grad;
       if (x.device().is_cuda()) {

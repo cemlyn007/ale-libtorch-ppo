@@ -1,5 +1,5 @@
 # Build options
-build --cxxopt='-std=c++20'
+build --action_env=BAZEL_CXXOPTS="-std=c++20"
 build --cxxopt='-Wall'
 build --cxxopt='-Werror'
 
@@ -9,3 +9,6 @@ test --test_output=errors
 # Debug build specific environment variables
 build:dbg --action_env=CUDA_LAUNCH_BLOCKING=1
 build:dbg --action_env=TORCH_USE_CUDA_DSA=1
+build:dbg --features=oso_prefix_is_pwd
+
+test: --test_output=all

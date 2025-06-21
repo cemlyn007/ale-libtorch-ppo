@@ -5,6 +5,7 @@ cc_library(
     strip_include_prefix = "/src",
     deps = [
         ":losses",
+        ":train",
         "@libtorch//:torch",
     ],
 )
@@ -15,6 +16,16 @@ cc_library(
     hdrs = ["losses.h"],
     strip_include_prefix = "/src",
     deps = [
+        "@libtorch//:torch",
+    ],
+)
+
+cc_library(
+    name = "train",
+    hdrs = ["train.h"],
+    strip_include_prefix = "/src",
+    deps = [
+        ":losses",
         "@libtorch//:torch",
     ],
 )

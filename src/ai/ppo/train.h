@@ -28,15 +28,16 @@ struct Hyperparameters {
 struct Batch {
   torch::Tensor observations;
   torch::Tensor actions;
-  torch::Tensor logits;
+  torch::Tensor log_probabilities;
   torch::Tensor advantages;
   torch::Tensor returns;
   torch::Tensor masks;
 
   Batch slice(int64_t start, int64_t end) const {
-    return {observations.slice(0, start, end), actions.slice(0, start, end),
-            logits.slice(0, start, end),       advantages.slice(0, start, end),
-            returns.slice(0, start, end),      masks.slice(0, start, end)};
+    return {
+        observations.slice(0, start, end),      actions.slice(0, start, end),
+        log_probabilities.slice(0, start, end), advantages.slice(0, start, end),
+        returns.slice(0, start, end),           masks.slice(0, start, end)};
   }
 };
 
@@ -96,16 +97,18 @@ MiniBatchUpdateResult
 mini_batch_update(Network &network, torch::optim::Optimizer &optimizer,
                   const Batch &batch, Hyperparameters &hyperparameters) {
   auto output = network->forward(batch.observations);
+  auto log_probabilities = ai::ppo::losses::normalize_logits(output.logits);
   auto ppo_metrics = ai::ppo::losses::compute(
-      output.logits, batch.logits, batch.actions, batch.advantages,
-      output.value, batch.returns, batch.masks, hyperparameters.clip_param,
-      hyperparameters.value_loss_coef, hyperparameters.entropy_coef);
+      log_probabilities, batch.log_probabilities, batch.actions,
+      batch.advantages, output.value, batch.returns, batch.masks,
+      hyperparameters.clip_param, hyperparameters.value_loss_coef,
+      hyperparameters.entropy_coef);
   optimizer.zero_grad();
   ppo_metrics.loss.backward();
   auto clipped_gradient = torch::nn::utils::clip_grad_norm_(
       network->parameters(), hyperparameters.max_gradient_norm, 2.0, true);
   optimizer.step();
-  return {ppo_metrics, clipped_gradient};
+  return MiniBatchUpdateResult{ppo_metrics, clipped_gradient};
 }
 
 template <NetworkModel Network>

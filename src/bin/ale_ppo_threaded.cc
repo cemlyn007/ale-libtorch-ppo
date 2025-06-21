@@ -222,7 +222,8 @@ void train_batch(torch::Device &device, Network &network,
   auto logits = batch.logits.view({-1, batch.logits.size(2)});
   auto returns = batch.returns.ravel();
   auto masks = batch.masks.ravel();
-  ai::ppo::train::Batch other_batch = {observations, actions, logits,
+  auto log_probabilities = ai::ppo::losses::normalize_logits(logits);
+  ai::ppo::train::Batch other_batch = {observations, actions, log_probabilities,
                                        advantages,   returns, masks};
 
   ai::ppo::train::Hyperparameters hp = {

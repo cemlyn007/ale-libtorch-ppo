@@ -1,13 +1,12 @@
 #include "ai/ppo/losses.h"
 
 namespace ai::ppo::losses {
-Metrics compute(const torch::Tensor &logits, const torch::Tensor &old_logits,
+Metrics compute(const torch::Tensor &log_probabilities,
+                const torch::Tensor &old_log_probabilities,
                 const torch::Tensor &actions, const torch::Tensor &advantages,
                 const torch::Tensor &values, const torch::Tensor &returns,
                 const torch::Tensor &masks, float clip_param,
                 float value_loss_coef, float entropy_coef) {
-  auto log_probabilities = normalize_logits(logits);
-  auto old_log_probabilities = normalize_logits(old_logits);
   auto clipped =
       clipped_surogate_objectives(log_probabilities, old_log_probabilities,
                                   actions, advantages, clip_param);
@@ -30,13 +29,14 @@ clipped_surogate_objectives(const torch::Tensor &log_probabilities,
                             const torch::Tensor &actions,
                             const torch::Tensor &advantages, float clip_param) {
   auto action_indices = actions.unsqueeze(-1);
-  auto ratio =
+  auto ratios =
       torch::exp(log_probabilities.gather(-1, action_indices).squeeze(-1) -
                  old_log_probabilities.gather(-1, action_indices).squeeze(-1));
-  auto unclipped = ratio * advantages;
-  auto clipped =
-      torch::clamp(ratio, 1.0 - clip_param, 1.0 + clip_param) * advantages;
-  return {torch::min(unclipped, clipped), ratio};
+  auto clipped_ratios =
+      torch::clamp(ratios, 1.0 - clip_param, 1.0 + clip_param);
+  auto unclipped = ratios * advantages;
+  auto clipped = clipped_ratios * advantages;
+  return {torch::min(unclipped, clipped), ratios};
 }
 
 torch::Tensor compute_entropies(const torch::Tensor &log_probabilities) {

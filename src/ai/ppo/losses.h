@@ -18,7 +18,8 @@ struct ClippedSurogateObjectivesResult {
   torch::Tensor ratios;
 };
 
-Metrics compute(const torch::Tensor &logits, const torch::Tensor &old_logits,
+Metrics compute(const torch::Tensor &log_probabilities,
+                const torch::Tensor &old_log_probabilities,
                 const torch::Tensor &actions, const torch::Tensor &advantages,
                 const torch::Tensor &values, const torch::Tensor &returns,
                 const torch::Tensor &masks, float clip_param,

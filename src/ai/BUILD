@@ -26,16 +26,6 @@ cc_library(
 )
 
 cc_library(
-    name = "ppo",
-    srcs = ["ppo.cc"],
-    hdrs = ["ppo.h"],
-    strip_include_prefix = "/src",
-    deps = [
-        "@libtorch//:torch",
-    ],
-)
-
-cc_library(
     name = "gae",
     srcs = ["gae.cc"],
     hdrs = ["gae.h"],
@@ -53,10 +43,6 @@ cc_library(
         "-DSTB_IMAGE_IMPLEMENTATION",
         "-DSTB_IMAGE_WRITE_IMPLEMENTATION",
     ],
-    # includes = [
-    #     "-DSTB_IMAGE_IMPLEMENTATION",
-    #     "-DSTB_IMAGE_WRITE_IMPLEMENTATION",
-    # ],
     strip_include_prefix = "/src",
     deps = [
         "@stb//:stb_image",

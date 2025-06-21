@@ -37,9 +37,9 @@ cc_library(
     deps = [
         "//src/ai:buffer",
         "//src/ai:gae",
-        "//src/ai:ppo",
         "//src/ai:rollout",
-        "//src/ai:vision",
         "//src/ai:video_recorder",
+        "//src/ai:vision",
+        "//src/ai/ppo",
     ],
 )

@@ -1,4 +1,4 @@
-#include "ai/ppo.h"
+#include "ai/ppo/losses.h"
 #include "ai/rollout.h"
 #include "ai/video_recorder.h"
 #include "ai/vision.h"
@@ -217,7 +217,7 @@ void initialize_weights(torch::nn::Module &module) {
   }
 }
 
-ai::ppo::Metrics
+ai::ppo::losses::Metrics
 compute_loss(Network &network, const torch::Tensor &observations,
              const torch::Tensor &actions, const torch::Tensor &advantages,
              const torch::Tensor &old_logits, const torch::Tensor &returns,
@@ -226,9 +226,9 @@ compute_loss(Network &network, const torch::Tensor &observations,
   auto output = network->forward(observations);
   auto logits = output.logits;
   auto values = output.value;
-  return ai::ppo::ppo_loss(logits, old_logits, actions, advantages, values,
-                           returns, masks, clip_param, value_loss_coef,
-                           entropy_coef);
+  return ai::ppo::losses::ppo_loss(logits, old_logits, actions, advantages,
+                                   values, returns, masks, clip_param,
+                                   value_loss_coef, entropy_coef);
 }
 
 void mini_batch_update(torch::Device &device, Network &network,

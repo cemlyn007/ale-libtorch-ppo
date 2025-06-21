@@ -1,4 +1,4 @@
-#include "ai/ppo.h"
+#include "ai/ppo/losses.h"
 #include "ai/rollout.h"
 #include "ai/video_recorder.h"
 #include "ai/vision.h"
@@ -8,7 +8,6 @@
 #include <future>
 #include <iostream>
 #include <numeric>
-#include <shared_mutex>
 #include <thread>
 #include <torch/nn.h>
 #include <torch/torch.h>
@@ -32,11 +31,12 @@ struct Config {
   float max_gradient_norm;
   size_t num_rollouts;
   size_t log_episode_frequency;
+  size_t num_workers;
 };
 
 static const Config config = {
-    16,      // total_environments
-    256,     // hidden_size
+    64,      // total_environments
+    64,      // hidden_size
     4,       // action_size (const, will be ignored)
     128,     // horizon
     108000,  // max_steps
@@ -44,15 +44,16 @@ static const Config config = {
     2.5e-4,  // learning_rate
     0.2,     // clip_param
     0.5,     // value_loss_coef
-    0.001,   // entropy_coef
+    0.002,   // entropy_coef
     4,       // num_epochs
     256,     // mini_batch_size
-    8,       // num_mini_batches
+    32,      // num_mini_batches
     0.99f,   // gae_discount
     0.95f,   // gae_lambda
     0.5f,    // max_gradient_norm
     1000000, // num_rollouts
-    10       // log_episode_frequency
+    10,      // log_episode_frequency
+    2        // num_workers
 };
 
 struct Batch {
@@ -239,7 +240,7 @@ void initialize_weights(torch::nn::Module &module) {
   }
 }
 
-ai::ppo::Metrics
+ai::ppo::losses::Metrics
 compute_loss(Network &network, const torch::Tensor &observations,
              const torch::Tensor &actions, const torch::Tensor &advantages,
              const torch::Tensor &old_logits, const torch::Tensor &returns,
@@ -248,9 +249,9 @@ compute_loss(Network &network, const torch::Tensor &observations,
   auto output = network->forward(observations);
   auto logits = output.logits;
   auto values = output.value;
-  return ai::ppo::ppo_loss(logits, old_logits, actions, advantages, values,
-                           returns, masks, clip_param, value_loss_coef,
-                           entropy_coef);
+  return ai::ppo::losses::ppo_loss(logits, old_logits, actions, advantages,
+                                   values, returns, masks, clip_param,
+                                   value_loss_coef, entropy_coef);
 }
 
 void mini_batch_update(torch::Device &device, Network &network,
@@ -318,6 +319,10 @@ void train(torch::Device &device, Network &network,
   }
 }
 
+// Note: The current implementation doesn't use locks for when training
+// and action sampling in the rollouts. LibTorch sounds like it is not
+// thread-safe, so it may make sense to use a mutex here if stability issues
+// arise.
 int main(int argc, char **argv) {
   const auto rom_path = argv[1];
   const auto logger_path = std::filesystem::path(argv[2]).replace_extension(
@@ -340,8 +345,6 @@ int main(int argc, char **argv) {
     std::filesystem::create_directories(video_path);
   }
 
-  std::shared_mutex mutex;
-
   // For writing the images
   int64_t episode = -1;
   bool recording = false;
@@ -356,15 +359,14 @@ int main(int argc, char **argv) {
   network->to(device);
   torch::optim::Adam optimizer(network->parameters(),
                                torch::optim::AdamOptions(config.learning_rate));
-  size_t num_workers = 64;
+
   std::vector<ai::rollout::Rollout> rollouts;
-  for (size_t i = 0; i < num_workers; ++i) {
+  for (size_t i = 0; i < config.num_workers; ++i) {
     rollouts.emplace_back(
         std::filesystem::path(rom_path), config.total_environments,
         config.horizon, config.max_steps, config.frame_stack,
-        [&network, &device, &mutex, action_size = config.action_size](
+        [&network, &device, action_size = config.action_size](
             const torch::Tensor &obs) -> ai::rollout::ActionResult {
-          std::shared_lock<std::shared_mutex> lock(mutex);
           network->eval();
           torch::NoGradGuard no_grad;
           auto observations = device.is_cuda() ? obs.to(torch::kFloat32) : obs;
@@ -376,7 +378,8 @@ int main(int argc, char **argv) {
                   logits.reshape({-1, static_cast<long>(action_size)}),
                   output.value.ravel()};
         },
-        config.gae_discount, config.gae_lambda, device, i);
+        config.gae_discount, config.gae_lambda, device,
+        i *config.total_environments);
   }
 
   torch::Tensor indices =
@@ -384,32 +387,38 @@ int main(int argc, char **argv) {
                    torch::TensorOptions().dtype(torch::kLong).device(device));
   Metrics metrics(config, device);
   size_t log_steps = 0;
-  for (size_t i = 0; i < config.num_rollouts; i++) {
-    std::cout << "Rollout " << i + 1 << " of " << config.num_rollouts
-              << std::endl;
-    std::vector<std::future<ai::rollout::RolloutResult>> futures;
-    std::vector<std::thread> threads;
-    for (auto &rollout : rollouts) {
-      std::packaged_task<ai::rollout::RolloutResult()> task(
-          [&rollout] { return rollout.rollout(); });
-      futures.emplace_back(task.get_future());
-      threads.emplace_back(std::move(task));
-    }
-    ai::rollout::RolloutResult result;
-    for (size_t j = 0; j < futures.size(); ++j) {
-      result = futures[j].get();
-      {
-        std::unique_lock<std::shared_mutex> lock(mutex);
-        train(device, network, optimizer, metrics, indices, result.batch);
-      }
-      log_steps += config.total_environments * config.horizon;
-      result.log.steps = log_steps;
-      log_data(logger, result.log, metrics);
-    }
-    for (auto &thread : threads) {
-      thread.join();
-    }
-    record(video_path, episode, recording, recorder, result.batch);
+  std::vector<std::future<ai::rollout::RolloutResult>> futures(
+      config.num_workers);
+  std::vector<std::thread> threads(config.num_workers);
+  for (size_t j = 0; j < config.num_workers; ++j) {
+    std::packaged_task<ai::rollout::RolloutResult()> task(
+        [&rollout = rollouts[j]] { return rollout.rollout(); });
+    futures[j] = task.get_future();
+    threads[j] = std::thread(std::move(task));
+  }
+  size_t rollout_index = 0;
+  size_t index = 0;
+  ai::rollout::RolloutResult result;
+  while (rollout_index < config.num_rollouts) {
+    std::cout << "Rollout " << rollout_index + 1 << " of "
+              << config.num_rollouts << std::endl;
+
+    result = futures[index].get();
+    train(device, network, optimizer, metrics, indices, result.batch);
+    log_steps += config.total_environments * config.horizon;
+    result.log.steps = log_steps;
+    log_data(logger, result.log, metrics);
+    threads[index].join();
+
+    std::packaged_task<ai::rollout::RolloutResult()> task(
+        [&rollout = rollouts[index]] { return rollout.rollout(); });
+    futures[index] = task.get_future();
+    threads[index] = std::thread(std::move(task));
+
+    if (index == 0)
+      record(video_path, episode, recording, recorder, result.batch);
+    index = (index + 1) % config.num_workers;
+    ++rollout_index;
   }
   std::cout << "Success" << std::endl;
   return 0;

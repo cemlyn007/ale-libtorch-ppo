@@ -1,0 +1,20 @@
+package(default_visibility = ["//visibility:public"])
+
+cc_library(
+    name = "ppo",
+    strip_include_prefix = "/src",
+    deps = [
+        ":losses",
+        "@libtorch//:torch",
+    ],
+)
+
+cc_library(
+    name = "losses",
+    srcs = ["losses.cc"],
+    hdrs = ["losses.h"],
+    strip_include_prefix = "/src",
+    deps = [
+        "@libtorch//:torch",
+    ],
+)

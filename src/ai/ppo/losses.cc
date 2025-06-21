@@ -1,6 +1,6 @@
-#include "ppo.h"
+#include "ai/ppo/losses.h"
 
-namespace ai::ppo {
+namespace ai::ppo::losses {
 Metrics ppo_loss(const torch::Tensor &logits, const torch::Tensor &old_logits,
                  const torch::Tensor &actions, const torch::Tensor &advantages,
                  const torch::Tensor &values, const torch::Tensor &returns,
@@ -34,4 +34,4 @@ Metrics ppo_loss(const torch::Tensor &logits, const torch::Tensor &old_logits,
           masks.detach()};
 }
 
-} // namespace ai::ppo
+} // namespace ai::ppo::losses

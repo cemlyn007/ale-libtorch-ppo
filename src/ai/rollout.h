@@ -1,5 +1,5 @@
+#include "ai/buffer.h"
 #include "ale/ale_interface.hpp"
-#include "buffer.h"
 #include <filesystem>
 #include <functional>
 #include <memory>

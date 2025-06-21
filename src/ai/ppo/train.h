@@ -31,6 +31,12 @@ struct Batch {
   torch::Tensor advantages;
   torch::Tensor returns;
   torch::Tensor masks;
+
+  Batch slice(int64_t start, int64_t end) const {
+    return {observations.slice(0, start, end), actions.slice(0, start, end),
+            logits.slice(0, start, end),       advantages.slice(0, start, end),
+            returns.slice(0, start, end),      masks.slice(0, start, end)};
+  }
 };
 
 struct Metrics {
@@ -116,13 +122,7 @@ void train(Network &network, torch::optim::Optimizer &optimizer,
          mini_batch_index++) {
       auto start = mini_batch_index * mini_batch_size;
       auto end = start + mini_batch_size;
-      auto indices_slice = indices.slice(0, start, end);
-      Batch mini_batch = {batch.observations.index_select(0, indices_slice),
-                          batch.actions.index_select(0, indices_slice),
-                          batch.logits.index_select(0, indices_slice),
-                          batch.advantages.index_select(0, indices_slice),
-                          batch.returns.index_select(0, indices_slice),
-                          batch.masks.index_select(0, indices_slice)};
+      Batch mini_batch = batch.slice(start, end);
       MiniBatchUpdateResult result =
           mini_batch_update(network, optimizer, mini_batch, hyperparameters);
       const torch::indexing::TensorIndex indices(

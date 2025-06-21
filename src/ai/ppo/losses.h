@@ -1,4 +1,4 @@
-#include "torch/torch.h"
+#include <torch/torch.h>
 
 namespace ai::ppo::losses {
 
@@ -12,10 +12,21 @@ struct Metrics {
   torch::Tensor masks;
 };
 
+struct ClippedSurogateObjectivesResult {
+  torch::Tensor values;
+  torch::Tensor ratios;
+};
+
 Metrics ppo_loss(const torch::Tensor &logits, const torch::Tensor &old_logits,
                  const torch::Tensor &actions, const torch::Tensor &advantages,
                  const torch::Tensor &values, const torch::Tensor &returns,
                  const torch::Tensor &masks, float clip_param,
                  float value_loss_coef, float entropy_coef);
+
+ClippedSurogateObjectivesResult
+clipped_surogate_objectives(const torch::Tensor &log_probabilities,
+                            const torch::Tensor &log_old_probabilities,
+                            const torch::Tensor &actions,
+                            const torch::Tensor &advantages, float clip_param);
 
 } // namespace ai::ppo::losses

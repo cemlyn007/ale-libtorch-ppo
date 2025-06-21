@@ -12,3 +12,14 @@ cc_binary(
         "@tensorboard_logger",
     ],
 )
+
+cc_binary(
+    name = "ale_ppo_threaded",
+    srcs = ["ale_ppo_threaded.cc"],
+    deps = [
+        "//src:ai",
+        "@arcade_learning_environment//:ale",
+        "@libtorch//:torch",
+        "@tensorboard_logger",
+    ],
+)

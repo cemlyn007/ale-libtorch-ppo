@@ -13,12 +13,13 @@ bazel build \
   --copt=-g \
   --linkopt=-fno-omit-frame-pointer \
   --strip=never \
-  //src:ale_libtorch_example
+  //src/bin:ale_ppo_threaded
 
 mkdir -p $tmp_directory
 echo "Require sudo to run perf:"
 trap 'echo -e "\nProgram stopped by user. Continuing with flamegraph generation..."' SIGINT
-sudo perf record -a -b -g --output=$perf_file_path $workspace/bazel-bin/src/ale_libtorch_example $workspace/roms/breakout.bin $workspace/logs/perf || true
+# bazel-bin/src/bin/ale_ppo_threaded.runfiles/_main/src/bin/ale_ppo_threaded
+sudo perf record -a -b -g --output=$perf_file_path $workspace/bazel-bin/src/bin/ale_ppo_threaded $workspace/roms/breakout.bin $workspace/logs/perf $workspace/images/perf || true
 trap - SIGINT
 sudo chown $USER $perf_file_path
 

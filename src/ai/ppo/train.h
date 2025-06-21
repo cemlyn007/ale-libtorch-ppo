@@ -1,5 +1,6 @@
 #include "ai/ppo/losses.h"
 #include <torch/torch.h>
+
 namespace ai::ppo::train {
 
 template <typename T>
@@ -39,6 +40,11 @@ struct Batch {
   }
 };
 
+struct MiniBatchUpdateResult {
+  ai::ppo::losses::Metrics ppo;
+  double clipped_gradient;
+};
+
 struct Metrics {
   torch::Tensor loss;
   torch::Tensor clipped_losses;
@@ -67,45 +73,39 @@ struct Metrics {
                          options.dtype(torch::kBool));
     clipped_gradients = torch::empty({num_epochs, num_mini_batches});
   }
-};
 
-template <NetworkModel Network>
-ai::ppo::losses::Metrics
-compute_loss(Network &network, const torch::Tensor &observations,
-             const torch::Tensor &actions, const torch::Tensor &advantages,
-             const torch::Tensor &old_logits, const torch::Tensor &returns,
-             const torch::Tensor &masks, float clip_param,
-             float value_loss_coef, float entropy_coef) {
-  auto output = network->forward(observations);
-  auto logits = output.logits;
-  auto values = output.value;
-  return ai::ppo::losses::compute(logits, old_logits, actions, advantages,
-                                  values, returns, masks, clip_param,
-                                  value_loss_coef, entropy_coef);
-}
-
-struct MiniBatchUpdateResult {
-  ai::ppo::losses::Metrics ppo;
-  double clipped_gradient;
+  void set(size_t epoch_index, size_t mini_batch_index,
+           const MiniBatchUpdateResult &result, const Batch &mini_batch) {
+    const torch::indexing::TensorIndex indices(
+        {{epoch_index, mini_batch_index}});
+    loss.index_put_(indices, result.ppo.loss.reshape({1}));
+    clipped_losses.index_put_(indices, result.ppo.clipped_losses);
+    value_losses.index_put_(indices, result.ppo.value_losses);
+    entropies.index_put_(indices, result.ppo.entropies);
+    ratio.index_put_(indices, result.ppo.ratio);
+    total_losses.index_put_(indices, result.ppo.total_losses);
+    clipped_gradients.index_put_(indices, result.clipped_gradient);
+    advantages.index_put_(indices, mini_batch.advantages);
+    returns.index_put_(indices, mini_batch.returns);
+    masks.index_put_(indices, mini_batch.masks);
+  }
 };
 
 template <NetworkModel Network>
 MiniBatchUpdateResult
 mini_batch_update(Network &network, torch::optim::Optimizer &optimizer,
                   const Batch &batch, Hyperparameters &hyperparameters) {
-  {
-    auto ppo_metrics = compute_loss(
-        network, batch.observations, batch.actions, batch.advantages,
-        batch.logits, batch.returns, batch.masks, hyperparameters.clip_param,
-        hyperparameters.value_loss_coef, hyperparameters.entropy_coef);
-    optimizer.zero_grad();
-    ppo_metrics.loss.backward();
-    auto clipped_gradient = torch::nn::utils::clip_grad_norm_(
-        network->parameters(), hyperparameters.max_gradient_norm, 2.0, true);
-    optimizer.step();
-
-    return {ppo_metrics, clipped_gradient};
-  }
+  auto output = network->forward(batch.observations);
+  auto ppo_metrics = ai::ppo::losses::compute(
+      output.logits, batch.logits, batch.actions, batch.advantages,
+      output.value, batch.returns, batch.masks, hyperparameters.clip_param,
+      hyperparameters.value_loss_coef, hyperparameters.entropy_coef);
+  optimizer.zero_grad();
+  ppo_metrics.loss.backward();
+  auto clipped_gradient = torch::nn::utils::clip_grad_norm_(
+      network->parameters(), hyperparameters.max_gradient_norm, 2.0, true);
+  optimizer.step();
+  return {ppo_metrics, clipped_gradient};
 }
 
 template <NetworkModel Network>
@@ -114,10 +114,14 @@ void train(Network &network, torch::optim::Optimizer &optimizer,
            size_t num_epochs, size_t num_mini_batches,
            Hyperparameters &hyperparameters) {
   network->train();
-  size_t mini_batch_size =
-      indices.size(0) / num_mini_batches; // Assuming batch size is divisible
+  size_t size = batch.observations.size(0);
+  if (size % num_mini_batches != 0) {
+    throw std::runtime_error(
+        "Batch size must be divisible by num_mini_batches");
+  }
+  size_t mini_batch_size = size / num_mini_batches;
   for (size_t epoch_index = 0; epoch_index < num_epochs; epoch_index++) {
-    torch::randperm_out(indices, batch.observations.size(0));
+    torch::randperm_out(indices, size);
     for (size_t mini_batch_index = 0; mini_batch_index < num_mini_batches;
          mini_batch_index++) {
       auto start = mini_batch_index * mini_batch_size;
@@ -125,18 +129,7 @@ void train(Network &network, torch::optim::Optimizer &optimizer,
       Batch mini_batch = batch.slice(start, end);
       MiniBatchUpdateResult result =
           mini_batch_update(network, optimizer, mini_batch, hyperparameters);
-      const torch::indexing::TensorIndex indices(
-          {{epoch_index, mini_batch_index}});
-      metrics.loss.index_put_(indices, result.ppo.loss.reshape({1}));
-      metrics.clipped_losses.index_put_(indices, result.ppo.clipped_losses);
-      metrics.value_losses.index_put_(indices, result.ppo.value_losses);
-      metrics.entropies.index_put_(indices, result.ppo.entropies);
-      metrics.ratio.index_put_(indices, result.ppo.ratio);
-      metrics.total_losses.index_put_(indices, result.ppo.total_losses);
-      metrics.clipped_gradients.index_put_(indices, result.clipped_gradient);
-      metrics.advantages.index_put_(indices, mini_batch.advantages);
-      metrics.returns.index_put_(indices, mini_batch.returns);
-      metrics.masks.index_put_(indices, mini_batch.masks);
+      metrics.set(epoch_index, mini_batch_index, result, mini_batch);
     }
   }
 }

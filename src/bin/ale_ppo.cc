@@ -226,9 +226,9 @@ compute_loss(Network &network, const torch::Tensor &observations,
   auto output = network->forward(observations);
   auto logits = output.logits;
   auto values = output.value;
-  return ai::ppo::losses::ppo_loss(logits, old_logits, actions, advantages,
-                                   values, returns, masks, clip_param,
-                                   value_loss_coef, entropy_coef);
+  return ai::ppo::losses::compute(logits, old_logits, actions, advantages,
+                                  values, returns, masks, clip_param,
+                                  value_loss_coef, entropy_coef);
 }
 
 void mini_batch_update(torch::Device &device, Network &network,

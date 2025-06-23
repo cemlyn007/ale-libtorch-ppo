@@ -48,12 +48,12 @@ Rollout::Rollout(
   for (int64_t i = 0; i < total_environments_; i++) {
     ales_.push_back(std::make_unique<ale::ALEInterface>());
     ales_.back()->setBool("truncate_on_loss_of_life", true);
-    ales_.back()->setInt("max_num_frames_per_episode", 108000);
+    ales_.back()->setInt("max_num_frames_per_episode", max_steps_);
     ales_.back()->setInt("frame_skip", 1);
     ales_.back()->setInt("random_seed", i + seed);
     ales_.back()->setFloat("repeat_action_probability", 0.0f);
     ales_.back()->loadROM(rom_path_);
-    assert(ales_.back()->getInt("max_num_frames_per_episode") == 108000);
+    assert(ales_.back()->getInt("max_num_frames_per_episode") == max_steps_);
     screen_width_ = ales_.back()->getScreen().width();
     screen_height_ = ales_.back()->getScreen().height();
   }

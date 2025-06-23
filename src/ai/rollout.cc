@@ -21,7 +21,7 @@ Rollout::Rollout(
             ale.getMinimalActionSet().size(), device);
       }()),
       total_environments_(total_environments), horizon_(horizon),
-      frame_stack_(frame_stack), max_steps_(max_steps), is_terminal_(),
+      frame_stack_(frame_stack), max_steps_(max_steps), is_terminated_(),
       is_truncated_(), is_episode_start_(), action_selector_(action_selector),
       device_(device) {
 
@@ -61,7 +61,7 @@ Rollout::Rollout(
   observations_ = torch::zeros(
       {total_environments_, frame_stack_, screen_height_, screen_width_},
       torch::TensorOptions(torch::kByte).device(device_));
-  is_terminal_ =
+  is_terminated_ =
       torch::zeros({total_environments_},
                    torch::TensorOptions(torch::kBool).device(device_));
   is_truncated_ =
@@ -77,7 +77,7 @@ Rollout::Rollout(
   episode_lengths_.resize(total_environments_, 0);
 }
 
-void Rollout::get_observations() {
+void Rollout::update_observations() {
   for (int64_t frame_index = frame_stack_ - 1; frame_index > 0; --frame_index) {
     observations_.index_put_(
         {torch::indexing::Slice(), frame_index},
@@ -100,7 +100,7 @@ void Rollout::get_observations() {
 }
 
 RolloutResult Rollout::rollout() {
-  get_observations();
+  update_observations();
   ActionResult action_result = action_selector_(observations_);
 
   std::vector<float> episode_returns;
@@ -116,23 +116,28 @@ RolloutResult Rollout::rollout() {
                                 std::to_string(ale_index));
       }
       auto action = ale_action_set[action_index];
-      step(ale_index, action);
+      auto result = step(ale_index, action);
+      rewards_[ale_index] = result.reward;
+      is_terminated_[ale_index] = result.terminated;
+      is_truncated_[ale_index] = result.truncated;
+      episode_returns_[ale_index] += result.reward;
+      episode_lengths_[ale_index]++;
     }
 
     // Add the observations, and the actions that from those observations led to
     // the rewards and terminal state changes.
-    buffer_.add(observations_, action_result.actions, rewards_, is_terminal_,
+    buffer_.add(observations_, action_result.actions, rewards_, is_terminated_,
                 is_truncated_, is_episode_start_, action_result.logits,
                 action_result.values);
 
     // Get the next observations after taking actions.
-    get_observations();
+    update_observations();
 
     for (int64_t ale_index = 0; ale_index < total_environments_; ++ale_index) {
-      if (is_terminal_[ale_index].item<bool>() ||
+      if (is_terminated_[ale_index].item<bool>() ||
           is_truncated_[ale_index].item<bool>()) {
         is_episode_start_[ale_index] = true;
-        is_terminal_[ale_index] = false;
+        is_terminated_[ale_index] = false;
         is_truncated_[ale_index] = false;
         current_episode_++;
         episode_returns.push_back(episode_returns_[ale_index]);
@@ -156,18 +161,16 @@ RolloutResult Rollout::rollout() {
   return {batch, log};
 }
 
-void Rollout::step(size_t environment_index, const ale::Action &action) {
+Step Rollout::step(size_t environment_index, const ale::Action &action) {
+  Step step;
   if (is_episode_start_[environment_index].item<bool>()) {
     ales_[environment_index]->reset_game();
   } else {
-    auto reward = ales_[environment_index]->act(action);
-    bool terminal = ales_[environment_index]->game_over(false);
-    bool truncated = (!terminal) && ales_[environment_index]->game_truncated();
-    rewards_[environment_index] = reward;
-    is_terminal_[environment_index] = terminal;
-    is_truncated_[environment_index] = truncated;
-    episode_returns_[environment_index] += reward;
-    episode_lengths_[environment_index]++;
+    step.reward = ales_[environment_index]->act(action);
+    step.terminated = ales_[environment_index]->game_over(false);
+    step.truncated = (!step.terminated);
+    step.truncated &= ales_[environment_index]->game_truncated();
   }
+  return step;
 }
 } // namespace ai::rollout

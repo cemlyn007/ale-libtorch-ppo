@@ -25,6 +25,12 @@ struct ActionResult {
   torch::Tensor values;
 };
 
+struct Step {
+  float reward;
+  bool terminated;
+  bool truncated;
+};
+
 class Rollout {
 public:
   Rollout(std::filesystem::path rom_path, size_t total_environments,
@@ -33,13 +39,13 @@ public:
           float gae_discount, float gae_lambda, const torch::Device &device,
           size_t seed);
   RolloutResult rollout();
-  void get_observations();
+  void update_observations();
 
   float gae_discount_ = 0.99f;
   float gae_lambda_ = 0.95f;
 
 private:
-  void step(size_t environment_index, const ale::Action &action);
+  Step step(size_t environment_index, const ale::Action &action);
   int64_t screen_width_;
   int64_t screen_height_;
   std::vector<std::unique_ptr<ale::ALEInterface>> ales_;
@@ -54,7 +60,7 @@ private:
   size_t total_steps_ = 0;
   float current_episode_return_ = 0.0f;
   size_t current_episode_length_ = 0;
-  torch::Tensor is_terminal_;
+  torch::Tensor is_terminated_;
   torch::Tensor is_truncated_;
   torch::Tensor is_episode_start_;
   std::vector<float> episode_returns_;

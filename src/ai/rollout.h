@@ -39,6 +39,7 @@ public:
   float gae_lambda_ = 0.95f;
 
 private:
+  void step(size_t environment_index, const ale::Action &action);
   int64_t screen_width_;
   int64_t screen_height_;
   std::vector<std::unique_ptr<ale::ALEInterface>> ales_;

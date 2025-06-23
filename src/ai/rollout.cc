@@ -108,28 +108,15 @@ RolloutResult Rollout::rollout() {
 
   for (size_t time_index = 0; time_index < horizon_; time_index++) {
     for (int64_t ale_index = 0; ale_index < total_environments_; ++ale_index) {
-      if (is_episode_start_[ale_index].item<bool>()) {
-        ales_[ale_index]->reset_game();
-      } else {
-        auto ale_action_set = ales_[ale_index]->getMinimalActionSet();
-        int64_t action_index = action_result.actions[ale_index].item<int64_t>();
-        if (action_index < 0 ||
-            action_index >= static_cast<int64_t>(ale_action_set.size())) {
-          throw std::out_of_range("Action index out of range for environment " +
-                                  std::to_string(ale_index));
-        }
-        auto ale_action = ale_action_set[action_index];
-        auto reward = ales_[ale_index]->act(ale_action);
-        bool terminal = ales_[ale_index]->game_over(false);
-        bool truncated = (!terminal) && ales_[ale_index]->game_truncated();
-
-        rewards_[ale_index] = reward;
-        is_terminal_[ale_index] = terminal;
-        is_truncated_[ale_index] = truncated;
-
-        episode_returns_[ale_index] += reward;
-        episode_lengths_[ale_index]++;
+      auto ale_action_set = ales_[ale_index]->getMinimalActionSet();
+      int64_t action_index = action_result.actions[ale_index].item<int64_t>();
+      if (action_index < 0 ||
+          action_index >= static_cast<int64_t>(ale_action_set.size())) {
+        throw std::out_of_range("Action index out of range for environment " +
+                                std::to_string(ale_index));
       }
+      auto action = ale_action_set[action_index];
+      step(ale_index, action);
     }
 
     // Add the observations, and the actions that from those observations led to
@@ -167,5 +154,20 @@ RolloutResult Rollout::rollout() {
   Log log{total_steps_, current_episode_, episode_returns, episode_lengths};
 
   return {batch, log};
+}
+
+void Rollout::step(size_t environment_index, const ale::Action &action) {
+  if (is_episode_start_[environment_index].item<bool>()) {
+    ales_[environment_index]->reset_game();
+  } else {
+    auto reward = ales_[environment_index]->act(action);
+    bool terminal = ales_[environment_index]->game_over(false);
+    bool truncated = (!terminal) && ales_[environment_index]->game_truncated();
+    rewards_[environment_index] = reward;
+    is_terminal_[environment_index] = terminal;
+    is_truncated_[environment_index] = truncated;
+    episode_returns_[environment_index] += reward;
+    episode_lengths_[environment_index]++;
+  }
 }
 } // namespace ai::rollout

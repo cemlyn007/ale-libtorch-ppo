@@ -8,6 +8,7 @@ cc_library(
     deps = [
         ":buffer",
         ":gae",
+        ":queue",
         "@arcade_learning_environment//:ale",
         "@libtorch//:torch",
     ],
@@ -58,4 +59,10 @@ cc_library(
     deps = [
         "@libtorch//:torch",
     ],
+)
+
+cc_library(
+    name = "queue",
+    hdrs = ["queue.h"],
+    strip_include_prefix = "/src",
 )

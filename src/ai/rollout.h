@@ -1,8 +1,9 @@
 #include "ai/buffer.h"
+#include "ai/queue.h"
 #include "ale/ale_interface.hpp"
+#include <atomic>
 #include <filesystem>
 #include <functional>
-#include <memory>
 #include <torch/torch.h>
 
 namespace ai::rollout {
@@ -25,7 +26,14 @@ struct ActionResult {
   torch::Tensor values;
 };
 
-struct Step {
+struct StepInput {
+  size_t environment_index;
+  ale::Action action;
+  bool is_episode_start;
+};
+
+struct StepResult {
+  size_t environment_index;
   float reward;
   bool terminated;
   bool truncated;
@@ -37,7 +45,8 @@ public:
           size_t horizon, size_t max_steps, size_t frame_stack,
           std::function<ActionResult(const torch::Tensor &)> action_selector,
           float gae_discount, float gae_lambda, const torch::Device &device,
-          size_t seed);
+          size_t seed, size_t num_workers, size_t worker_batch_size);
+  ~Rollout();
   RolloutResult rollout();
   void update_observations();
 
@@ -45,16 +54,19 @@ public:
   float gae_lambda_ = 0.95f;
 
 private:
-  Step step(size_t environment_index, const ale::Action &action);
+  StepResult step(const StepInput &);
+  std::vector<StepResult> step_all(const std::vector<StepInput> &inputs);
+  void worker();
+
   int64_t screen_width_;
   int64_t screen_height_;
   std::vector<std::unique_ptr<ale::ALEInterface>> ales_;
   std::string rom_path_;
   ai::buffer::Buffer buffer_;
   torch::Tensor observations_;
-  int64_t total_environments_;
+  size_t total_environments_;
   size_t horizon_;
-  int64_t frame_stack_;
+  size_t frame_stack_;
   size_t max_steps_;
   size_t current_episode_ = 0;
   size_t total_steps_ = 0;
@@ -68,6 +80,13 @@ private:
   torch::Tensor rewards_;
   std::function<ActionResult(const torch::Tensor &)> action_selector_;
   torch::Device device_;
+
+  std::atomic<bool> stop_;
+
+  std::vector<std::thread> workers_;
+  ai::queue::Queue<StepInput> action_queue_;
+  ai::queue::Queue<StepResult> step_queue_;
+  size_t batch_size_;
 };
 
 } // namespace ai::rollout

@@ -6,10 +6,8 @@
 #include "tensorboard_logger.h"
 #include <ale/ale_interface.hpp>
 #include <ale/version.hpp>
-#include <future>
 #include <iostream>
 #include <numeric>
-#include <thread>
 #include <torch/nn.h>
 #include <torch/torch.h>
 
@@ -33,11 +31,12 @@ struct Config {
   size_t num_rollouts;
   size_t log_episode_frequency;
   size_t num_workers;
+  size_t worker_batch_size;
 };
 
 static const Config config = {
-    64,      // total_environments
-    64,      // hidden_size
+    512,     // total_environments
+    256,     // hidden_size
     4,       // action_size (const, will be ignored)
     128,     // horizon
     108000,  // max_steps
@@ -47,14 +46,15 @@ static const Config config = {
     0.5,     // value_loss_coef
     0.002,   // entropy_coef
     4,       // num_epochs
-    256,     // mini_batch_size
-    32,      // num_mini_batches
+    4096,    // mini_batch_size
+    16,      // num_mini_batches
     0.99f,   // gae_discount
     0.95f,   // gae_lambda
     0.5f,    // max_gradient_norm
     1000000, // num_rollouts
     10,      // log_episode_frequency
-    2        // num_workers
+    2,       // num_workers
+    64       // worker_batch_size
 };
 
 struct Batch {
@@ -275,64 +275,38 @@ int main(int argc, char **argv) {
   torch::optim::Adam optimizer(network->parameters(),
                                torch::optim::AdamOptions(config.learning_rate));
 
-  std::vector<ai::rollout::Rollout> rollouts;
-  for (size_t i = 0; i < config.num_workers; ++i) {
-    rollouts.emplace_back(
-        std::filesystem::path(rom_path), config.total_environments,
-        config.horizon, config.max_steps, config.frame_stack,
-        [&network, &device, action_size = config.action_size](
-            const torch::Tensor &obs) -> ai::rollout::ActionResult {
-          network->eval();
-          torch::NoGradGuard no_grad;
-          auto observations = device.is_cuda() ? obs.to(torch::kFloat32) : obs;
-          auto output = network->forward(observations.to(device));
-          auto logits = output.logits;
-          auto probabilities = torch::nn::functional::softmax(logits, -1);
-          auto actions = torch::multinomial(probabilities, 1, true);
-          return {actions.ravel(),
-                  logits.reshape({-1, static_cast<long>(action_size)}),
-                  output.value.ravel()};
-        },
-        config.gae_discount, config.gae_lambda, device,
-        i *config.total_environments);
-  }
-
+  ai::rollout::Rollout rollout(
+      std::filesystem::path(rom_path), config.total_environments,
+      config.horizon, config.max_steps, config.frame_stack,
+      [&network, &device, action_size = config.action_size](
+          const torch::Tensor &obs) -> ai::rollout::ActionResult {
+        network->eval();
+        torch::NoGradGuard no_grad;
+        auto observations = device.is_cuda() ? obs.to(torch::kFloat32) : obs;
+        auto output = network->forward(observations.to(device));
+        auto logits = output.logits;
+        auto probabilities = torch::nn::functional::softmax(logits, -1);
+        auto actions = torch::multinomial(probabilities, 1, true);
+        return {actions.ravel(),
+                logits.reshape({-1, static_cast<long>(action_size)}),
+                output.value.ravel()};
+      },
+      config.gae_discount, config.gae_lambda, device, 0, config.num_workers);
   torch::Tensor indices =
       torch::empty(config.mini_batch_size * config.num_mini_batches,
                    torch::TensorOptions().dtype(torch::kLong).device(device));
   ai::ppo::train::Metrics metrics(config.num_epochs, config.num_mini_batches,
                                   config.mini_batch_size, device);
-  size_t log_steps = 0;
-  std::vector<std::future<ai::rollout::RolloutResult>> futures(
-      config.num_workers);
-  std::vector<std::thread> threads(config.num_workers);
-  for (size_t j = 0; j < config.num_workers; ++j) {
-    std::packaged_task<ai::rollout::RolloutResult()> task(
-        [&rollout = rollouts[j]] { return rollout.rollout(); });
-    futures[j] = task.get_future();
-    threads[j] = std::thread(std::move(task));
-  }
   size_t rollout_index = 0;
   size_t index = 0;
   ai::rollout::RolloutResult result;
   while (rollout_index < config.num_rollouts) {
     std::cout << "Rollout " << rollout_index + 1 << " of "
               << config.num_rollouts << std::endl;
-
-    result = futures[index].get();
+    result = rollout.rollout();
     train_batch(device, network, optimizer, metrics, indices, result.batch);
-    log_steps += config.total_environments * config.horizon;
-    result.log.steps = log_steps;
     log_data(logger, result.log, metrics);
-    threads[index].join();
-
-    std::packaged_task<ai::rollout::RolloutResult()> task(
-        [&rollout = rollouts[index]] { return rollout.rollout(); });
-    futures[index] = task.get_future();
-    threads[index] = std::thread(std::move(task));
-
-    if (index == 0)
-      record(video_path, episode, recording, recorder, result.batch);
+    record(video_path, episode, recording, recorder, result.batch);
     index = (index + 1) % config.num_workers;
     ++rollout_index;
   }

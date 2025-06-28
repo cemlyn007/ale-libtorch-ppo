@@ -9,38 +9,32 @@ Buffer::Buffer(size_t total_environments, size_t capacity,
       capacity_(capacity), indices_(0) {
   observation_shape_ =
       std::vector<int64_t>(observation_shape.begin(), observation_shape.end());
-  auto buffer_observation_shape = observation_shape_;
-  buffer_observation_shape.insert(buffer_observation_shape.begin(), capacity_);
-  buffer_observation_shape.insert(buffer_observation_shape.begin(),
-                                  total_environments_);
-  observations_ =
-      torch::zeros(buffer_observation_shape,
-                   torch::TensorOptions(torch::kByte).device(device_));
+  std::vector<int64_t> buffer_observation_shape = {
+      static_cast<int64_t>(total_environments_),
+      static_cast<int64_t>(capacity_)};
+  buffer_observation_shape.insert(buffer_observation_shape.end(),
+                                  observation_shape_.begin(),
+                                  observation_shape_.end());
   long total_environments_long = static_cast<long>(total_environments_);
   long capacity_long = static_cast<long>(capacity_);
 
-  auto float_options = torch::TensorOptions(torch::kFloat).device(device_);
-  actions_ = torch::zeros({total_environments_long, capacity_long},
-                          torch::TensorOptions(torch::kLong).device(device_));
-  rewards_ =
-      torch::zeros({total_environments_long, capacity_long}, float_options);
-  terminals_ = torch::zeros({total_environments_long, capacity_long},
-                            torch::TensorOptions(torch::kBool).device(device_));
-  truncations_ =
-      torch::zeros({total_environments_long, capacity_long},
-                   torch::TensorOptions(torch::kBool).device(device_));
-  episode_starts_ =
-      torch::zeros({total_environments_long, capacity_long},
-                   torch::TensorOptions(torch::kBool).device(device_));
-  logits_ = torch::zeros({total_environments_long, capacity_long,
-                          static_cast<int64_t>(action_size)},
-                         float_options);
-  values_ =
-      torch::zeros({total_environments_long, capacity_long}, float_options);
-
-  advantages_ =
-      torch::zeros({total_environments_long, capacity_long},
-                   torch::TensorOptions(torch::kFloat32).device(device_));
+  auto options = torch::TensorOptions().device(device_);
+  auto float_options = options.dtype(torch::kFloat32);
+  auto bool_options = options.dtype(torch::kBool);
+  auto long_options = options.dtype(torch::kLong);
+  auto byte_options = options.dtype(torch::kByte);
+  auto scalar_shape = {total_environments_long, capacity_long};
+  auto logits_shape = {total_environments_long, capacity_long,
+                       static_cast<int64_t>(action_size)};
+  observations_ = torch::zeros(buffer_observation_shape, byte_options);
+  actions_ = torch::zeros(scalar_shape, long_options);
+  rewards_ = torch::zeros(scalar_shape, float_options);
+  terminals_ = torch::zeros(scalar_shape, bool_options);
+  truncations_ = torch::zeros(scalar_shape, bool_options);
+  episode_starts_ = torch::zeros(scalar_shape, bool_options);
+  logits_ = torch::zeros(logits_shape, float_options);
+  values_ = torch::zeros(scalar_shape, float_options);
+  advantages_ = torch::zeros(scalar_shape, float_options);
   returns_ = torch::zeros_like(advantages_);
 }
 
@@ -50,15 +44,14 @@ void Buffer::add(const torch::Tensor &observations,
                  const torch::Tensor &truncations,
                  const torch::Tensor &episode_starts,
                  const torch::Tensor &logits, const torch::Tensor &values) {
-  observations_.index_put_({torch::indexing::Slice(), indices_}, observations);
-  actions_.index_put_({torch::indexing::Slice(), indices_}, actions);
-  rewards_.index_put_({torch::indexing::Slice(), indices_}, rewards);
-  terminals_.index_put_({torch::indexing::Slice(), indices_}, terminals);
-  truncations_.index_put_({torch::indexing::Slice(), indices_}, truncations);
-  episode_starts_.index_put_({torch::indexing::Slice(), indices_},
-                             episode_starts);
-  logits_.index_put_({torch::indexing::Slice(), indices_}, logits);
-  values_.index_put_({torch::indexing::Slice(), indices_}, values);
+  observations_.select(1, indices_).copy_(observations);
+  actions_.select(1, indices_).copy_(actions);
+  rewards_.select(1, indices_).copy_(rewards);
+  terminals_.select(1, indices_).copy_(terminals);
+  truncations_.select(1, indices_).copy_(truncations);
+  episode_starts_.select(1, indices_).copy_(episode_starts);
+  logits_.select(1, indices_).copy_(logits);
+  values_.select(1, indices_).copy_(values);
   indices_ = (indices_ + 1) % capacity_;
 }
 

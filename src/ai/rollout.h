@@ -45,7 +45,8 @@ public:
           size_t horizon, size_t max_steps, size_t frame_stack,
           std::function<ActionResult(const torch::Tensor &)> action_selector,
           float gae_discount, float gae_lambda, const torch::Device &device,
-          size_t seed, size_t num_workers, size_t worker_batch_size);
+          size_t seed, size_t num_workers, size_t worker_batch_size,
+          size_t frame_skip);
   ~Rollout();
   RolloutResult rollout();
   void update_observations();

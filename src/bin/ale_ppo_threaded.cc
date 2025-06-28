@@ -11,6 +11,20 @@
 #include <torch/nn.h>
 #include <torch/torch.h>
 
+// This is being used for annealing the entropy coefficient
+//  based on the average return.
+static double sum = 0;
+static double count = 1;
+
+double get_average_return() { return sum / count; }
+
+double get_annealed_entropy_coef(double entropy_coef) {
+  // This is a simple annealing function that decreases the entropy
+  // coefficient as the average return increases.
+  // 400 is the maximum episodic return for playing breakout.
+  return entropy_coef * (400.0 - get_average_return()) / 400.0;
+}
+
 struct Config {
   size_t total_environments;
   size_t hidden_size;
@@ -32,29 +46,31 @@ struct Config {
   size_t log_episode_frequency;
   size_t num_workers;
   size_t worker_batch_size;
+  size_t frame_skip;
 };
 
 static const Config config = {
-    512,     // total_environments
-    256,     // hidden_size
-    4,       // action_size (const, will be ignored)
-    128,     // horizon
-    108000,  // max_steps
-    4,       // frame_stack
-    2.5e-4,  // learning_rate
-    0.2,     // clip_param
-    0.5,     // value_loss_coef
-    0.002,   // entropy_coef
-    4,       // num_epochs
-    4096,    // mini_batch_size
-    16,      // num_mini_batches
-    0.99f,   // gae_discount
-    0.95f,   // gae_lambda
-    0.5f,    // max_gradient_norm
-    1000000, // num_rollouts
-    10,      // log_episode_frequency
-    2,       // num_workers
-    64       // worker_batch_size
+    3072,   // total_environments
+    256,    // hidden_size
+    4,      // action_size (const, will be ignored)
+    32,     // horizon
+    108000, // max_steps
+    4,      // frame_stack
+    2.5e-4, // learning_rate
+    0.1,    // clip_param
+    0.5,    // value_loss_coef
+    0.01,   // entropy_coef
+    1,      // num_epochs
+    2048,   // mini_batch_size
+    48,     // num_mini_batches
+    0.99f,  // gae_discount
+    0.95f,  // gae_lambda
+    0.5f,   // max_gradient_norm
+    7000,   // num_rollouts 1000000
+    10,     // log_episode_frequency
+    32,     // num_workers
+    48,     // worker_batch_size
+    4,      // frame_skip
 };
 
 struct Batch {
@@ -131,22 +147,28 @@ void log_data(TensorBoardLogger &logger, const ai::rollout::Log &log,
 void record(const std::filesystem::path &video_path, int64_t &episode,
             bool &recording, ai::video_recorder::VideoRecorder &recorder,
             ai::buffer::Batch &batch) {
-  auto observations = batch.observations.index({0, torch::indexing::Slice(), 0})
-                          .to(torch::kCPU);
-  auto masks = batch.masks[0].to(torch::kCPU);
-  for (size_t frame = 0; frame < config.horizon; ++frame) {
-    bool new_episode = !masks[frame].item<bool>();
-    if (new_episode) {
-      ++episode;
-    }
-    if (episode % config.log_episode_frequency == 0) {
-      if (new_episode && recording) {
-        auto path = video_path / (std::to_string(episode) + ".mp4");
-        recorder.complete(path);
+  const auto new_episodes =
+      batch.masks[0].logical_not().to(torch::kCPU).contiguous();
+  if (recording || new_episodes.sum().item<int64_t>() > 0) {
+    torch::Tensor observations =
+        batch.observations.index({0, torch::indexing::Slice(), 0})
+            .to(torch::kCPU)
+            .contiguous();
+    for (size_t frame = 0; frame < config.horizon; ++frame) {
+      bool new_episode = new_episodes[frame].item<bool>();
+      if (new_episode) {
+        if (recording) {
+          auto path = video_path / (std::to_string(episode) + ".mp4");
+          recorder.complete(path);
+          recording = false;
+        }
+        ++episode;
       }
-      const auto &observation = observations[frame];
-      recorder.add(observation.data_ptr<uint8_t>());
-      recording = true;
+      if (episode % config.log_episode_frequency == 0) {
+        const auto &observation = observations[frame];
+        recorder.add(observation.data_ptr<uint8_t>());
+        recording = true;
+      }
     }
   }
 }
@@ -227,7 +249,8 @@ void train_batch(torch::Device &device, Network &network,
                                        advantages,   returns, masks};
 
   ai::ppo::train::Hyperparameters hp = {
-      config.clip_param, config.value_loss_coef, config.entropy_coef,
+      config.clip_param, config.value_loss_coef,
+      static_cast<float>(get_annealed_entropy_coef(config.entropy_coef)),
       config.max_gradient_norm};
   ai::ppo::train::train<Network>(network, optimizer, metrics, indices,
                                  other_batch, config.num_epochs,
@@ -245,6 +268,10 @@ int main(int argc, char **argv) {
       std::to_string(
           std::chrono::system_clock::now().time_since_epoch().count()));
   const auto video_path = std::filesystem::path(argv[3]);
+  std::filesystem::path profile_path;
+  if (argc == 5) {
+    profile_path = std::filesystem::path(argv[4]);
+  }
   torch::Device device(torch::kCPU);
   if (torch::cuda::is_available()) {
     std::cout << "CUDA is available! Training on GPU." << std::endl;
@@ -291,7 +318,8 @@ int main(int argc, char **argv) {
                 logits.reshape({-1, static_cast<long>(action_size)}),
                 output.value.ravel()};
       },
-      config.gae_discount, config.gae_lambda, device, 0, config.num_workers);
+      config.gae_discount, config.gae_lambda, device, 0, config.num_workers,
+      config.worker_batch_size, config.frame_skip);
   torch::Tensor indices =
       torch::empty(config.mini_batch_size * config.num_mini_batches,
                    torch::TensorOptions().dtype(torch::kLong).device(device));
@@ -300,15 +328,38 @@ int main(int argc, char **argv) {
   size_t rollout_index = 0;
   size_t index = 0;
   ai::rollout::RolloutResult result;
+  if (!profile_path.empty()) {
+    torch::autograd::profiler::ProfilerConfig profiler_config =
+        torch::autograd::profiler::ProfilerConfig(
+            torch::autograd::profiler::ProfilerState::KINETO);
+    auto activities = {torch::autograd::profiler::ActivityType::CUDA,
+                       torch::autograd::profiler::ActivityType::CPU};
+    torch::autograd::profiler::prepareProfiler(profiler_config, activities);
+    torch::autograd::profiler::enableProfiler(
+        profiler_config, activities,
+        {torch::RecordScope::FUNCTION, torch::RecordScope::USER_SCOPE});
+  }
   while (rollout_index < config.num_rollouts) {
     std::cout << "Rollout " << rollout_index + 1 << " of "
               << config.num_rollouts << std::endl;
+    static_cast<torch::optim::AdamOptions &>(
+        optimizer.param_groups()[0].options())
+        .lr(config.learning_rate *
+            (1.0 - rollout_index / static_cast<double>(config.num_rollouts)));
     result = rollout.rollout();
     train_batch(device, network, optimizer, metrics, indices, result.batch);
     log_data(logger, result.log, metrics);
-    record(video_path, episode, recording, recorder, result.batch);
+    sum += std::accumulate(result.log.episode_returns.begin(),
+                           result.log.episode_returns.end(), 0.0f);
+    count += result.log.episode_returns.size();
+    if (config.log_episode_frequency > 0)
+      record(video_path, episode, recording, recorder, result.batch);
     index = (index + 1) % config.num_workers;
     ++rollout_index;
+  }
+  if (!profile_path.empty()) {
+    auto profiler_result = torch::autograd::profiler::disableProfiler();
+    profiler_result->save(profile_path);
   }
   std::cout << "Success" << std::endl;
   return 0;

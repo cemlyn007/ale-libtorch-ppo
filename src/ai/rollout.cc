@@ -9,7 +9,8 @@ Rollout::Rollout(
     size_t max_steps, size_t frame_stack,
     std::function<ActionResult(const torch::Tensor &)> action_selector,
     float gae_discount, float gae_lambda, const torch::Device &device,
-    size_t seed, size_t num_workers, size_t worker_batch_size)
+    size_t seed, size_t num_workers, size_t worker_batch_size,
+    size_t frame_skip)
     : gae_discount_(gae_discount), gae_lambda_(gae_lambda), ales_(),
       rom_path_(rom_path), buffer_([&] {
         ale::ALEInterface ale;
@@ -47,7 +48,7 @@ Rollout::Rollout(
     ales_.push_back(std::make_unique<ale::ALEInterface>());
     ales_.back()->setBool("truncate_on_loss_of_life", true);
     ales_.back()->setInt("max_num_frames_per_episode", max_steps_);
-    ales_.back()->setInt("frame_skip", 1);
+    ales_.back()->setInt("frame_skip", static_cast<int>(frame_skip));
     ales_.back()->setInt("random_seed", i + seed);
     ales_.back()->setFloat("repeat_action_probability", 0.0f);
     ales_.back()->loadROM(rom_path_);
@@ -81,6 +82,8 @@ Rollout::Rollout(
 
 Rollout::~Rollout() {
   stop_ = true;
+  for (size_t i = 0; i < total_environments_; ++i)
+    action_queue_.push(std::vector<StepInput>{});
   for (auto &worker : workers_) {
     if (worker.joinable()) {
       worker.join();
@@ -95,15 +98,12 @@ void Rollout::update_observations() {
         observations_.index({torch::indexing::Slice(), frame_index - 1}));
   }
   std::vector<unsigned char> gray_scale(screen_height_ * screen_width_);
+  auto frame = torch::from_blob(gray_scale.data(),
+                                {screen_height_, screen_width_}, torch::kByte);
   for (size_t i = 0; i < total_environments_; ++i) {
     ales_[i]->getScreenGrayscale(gray_scale);
-    auto frame = torch::from_blob(
-        gray_scale.data(), {screen_height_, screen_width_}, torch::kByte);
     if (is_episode_start_[i].item<bool>()) {
-      for (size_t t = 0; t < frame_stack_; ++t) {
-        observations_.index_put_(
-            {static_cast<int64_t>(i), static_cast<int64_t>(t)}, frame);
-      }
+      observations_.select(0, i).copy_(frame);
     } else {
       observations_.index_put_({static_cast<int64_t>(i), 0}, frame);
     }
@@ -194,8 +194,8 @@ void Rollout::worker() {
   while (!stop_) {
     auto inputs = action_queue_.pop(batch_size_);
     for (const auto &input : inputs) {
-    StepResult result = step(input);
-    step_queue_.push(result);
+      StepResult result = step(input);
+      step_queue_.push(result);
     }
   }
 }

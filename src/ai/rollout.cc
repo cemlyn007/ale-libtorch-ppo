@@ -60,17 +60,14 @@ Rollout::Rollout(
 
   auto total = static_cast<int64_t>(total_environments_);
   auto frame = static_cast<int64_t>(frame_stack_);
-  observations_ =
-      torch::zeros({total, frame, screen_height_, screen_width_},
-                   torch::TensorOptions(torch::kByte).device(device_));
-  is_terminated_ =
-      torch::zeros({total}, torch::TensorOptions(torch::kBool).device(device_));
-  is_truncated_ =
-      torch::zeros({total}, torch::TensorOptions(torch::kBool).device(device_));
-  is_episode_start_ =
-      torch::ones({total}, torch::TensorOptions(torch::kBool).device(device_));
-  rewards_ = torch::zeros(
-      {total}, torch::TensorOptions(torch::kFloat32).device(device_));
+  auto options = torch::TensorOptions(torch::kFloat32).device(device_);
+  observations_ = torch::zeros({total, frame, screen_height_, screen_width_},
+                               options.dtype(torch::kByte));
+  is_terminated_ = torch::zeros({total}, options.dtype(torch::kBool));
+  is_truncated_ = torch::zeros({total}, options.dtype(torch::kBool));
+  is_episode_start_ = torch::ones({total}, options.dtype(torch::kBool));
+  rewards_ = torch::zeros({total}, options);
+
   episode_returns_.resize(total_environments_, 0.0f);
   episode_lengths_.resize(total_environments_, 0);
 

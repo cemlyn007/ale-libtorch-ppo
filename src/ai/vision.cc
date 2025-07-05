@@ -1,6 +1,6 @@
 #include "ai/vision.h"
-#include "torch/torch.h"
 #include <array>
+#include <torch/torch.h>
 
 namespace ai::vision {
 
@@ -10,8 +10,7 @@ torch::Tensor resize_grayscale_image(const torch::Tensor &image) {
   assert(image.size(1) == 160);
   const auto options = torch::nn::functional::InterpolateFuncOptions()
                            .size(std::vector<int64_t>({84, 84}))
-                           .mode(torch::kNearestExact)
-                           .align_corners(false);
+                           .mode(torch::kArea);
   const std::array<int64_t, 4> size = {1, 1, 210, 160};
   const auto &input = image.view(size);
   const auto out = torch::nn::functional::interpolate(input, options);
@@ -27,13 +26,10 @@ resize_frame_stacked_grayscale_images(const torch::Tensor &images) {
   assert(images.size(3) == 160);
   const auto options = torch::nn::functional::InterpolateFuncOptions()
                            .size(std::vector<int64_t>({84, 84}))
-                           .mode(torch::kNearestExact)
-                           .align_corners(false);
-  const std::array<int64_t, 4> size = {batch_size * frame_stack, 1, 210, 160};
-  const auto input = images.view(size);
+                           .mode(torch::kArea);
+  const auto input = images.flatten(0, 1).unsqueeze(1);
   const auto out = torch::nn::functional::interpolate(input, options);
-  const std::array<int64_t, 4> shape = {batch_size, frame_stack, 84, 84};
-  return out.reshape(shape);
+  return out.squeeze(1).unflatten(0, {batch_size, frame_stack});
 };
 
 } // namespace ai::vision

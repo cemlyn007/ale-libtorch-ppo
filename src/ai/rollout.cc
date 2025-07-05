@@ -82,8 +82,11 @@ Rollout::Rollout(
 
 Rollout::~Rollout() {
   stop_ = true;
-  for (size_t i = 0; i < total_environments_; ++i)
-    action_queue_.push(std::vector<StepInput>{});
+  std::vector<StepInput> inputs(total_environments_);
+  for (size_t i = 0; i < total_environments_; ++i) {
+    inputs[i] = StepInput{i, ales_[i]->getMinimalActionSet().front(), true};
+  }
+  action_queue_.push(inputs);
   for (auto &worker : workers_) {
     if (worker.joinable()) {
       worker.join();

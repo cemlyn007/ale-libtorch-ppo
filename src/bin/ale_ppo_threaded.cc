@@ -10,6 +10,7 @@
 #include <numeric>
 #include <torch/nn.h>
 #include <torch/torch.h>
+#include <yaml-cpp/yaml.h>
 
 // This is being used for annealing the entropy coefficient
 //  based on the average return.
@@ -82,29 +83,31 @@ get_hparams(const Config &config) {
   return hparams;
 }
 
-static const Config config = {
-    3072,   // total_environments
-    256,    // hidden_size
-    4,      // action_size (const, will be ignored)
-    32,     // horizon
-    108000, // max_steps
-    4,      // frame_stack
-    2.5e-4, // learning_rate
-    0.1,    // clip_param
-    0.5,    // value_loss_coef
-    0.01,   // entropy_coef
-    1,      // num_epochs
-    2048,   // mini_batch_size
-    48,     // num_mini_batches
-    0.99f,  // gae_discount
-    0.95f,  // gae_lambda
-    0.5f,   // max_gradient_norm
-    7000,   // num_rollouts 1000000
-    10,     // log_episode_frequency
-    32,     // num_workers
-    48,     // worker_batch_size
-    4,      // frame_skip
-};
+Config load_config(const std::filesystem::path &path) {
+  Config config;
+  YAML::Node node = YAML::LoadFile(path.string());
+  config.total_environments = node["total_environments"].as<size_t>(512);
+  config.hidden_size = node["hidden_size"].as<size_t>(512);
+  config.horizon = node["horizon"].as<size_t>(128);
+  config.max_steps = node["max_steps"].as<size_t>(108000);
+  config.frame_stack = node["frame_stack"].as<size_t>(4);
+  config.learning_rate = node["learning_rate"].as<double>(2.5e-4);
+  config.clip_param = node["clip_param"].as<float>(0.1f);
+  config.value_loss_coef = node["value_loss_coef"].as<float>(0.5f);
+  config.entropy_coef = node["entropy_coef"].as<float>(0.01f);
+  config.num_epochs = node["num_epochs"].as<long>(1);
+  config.mini_batch_size = node["mini_batch_size"].as<long>(2048);
+  config.num_mini_batches = node["num_mini_batches"].as<long>(32);
+  config.gae_discount = node["gae_discount"].as<float>(0.99f);
+  config.gae_lambda = node["gae_lambda"].as<float>(0.95f);
+  config.max_gradient_norm = node["max_gradient_norm"].as<float>(0.5f);
+  config.num_rollouts = node["num_rollouts"].as<size_t>(7000);
+  config.log_episode_frequency = node["log_episode_frequency"].as<size_t>(10);
+  config.num_workers = node["num_workers"].as<size_t>(16);
+  config.worker_batch_size = node["worker_batch_size"].as<size_t>(32);
+  config.frame_skip = node["frame_skip"].as<size_t>(4);
+  return config;
+}
 
 struct Batch {
   torch::Tensor observations;
@@ -179,7 +182,7 @@ void log_data(TensorBoardLogger &logger, const ai::rollout::Log &log,
 
 void record(const std::filesystem::path &video_path, int64_t &episode,
             bool &recording, ai::video_recorder::VideoRecorder &recorder,
-            ai::buffer::Batch &batch) {
+            ai::buffer::Batch &batch, const Config &config) {
   const auto new_episodes =
       batch.masks[0].logical_not().to(torch::kCPU).contiguous();
   if (recording || new_episodes.sum().item<int64_t>() > 0) {
@@ -267,7 +270,7 @@ void initialize_weights(torch::nn::Module &module) {
 void train_batch(torch::Device &device, Network &network,
                  torch::optim::Optimizer &optimizer,
                  ai::ppo::train::Metrics &metrics, torch::Tensor &indices,
-                 ai::buffer::Batch &batch) {
+                 ai::buffer::Batch &batch, const Config &config) {
   network->train();
   auto observations = batch.observations.view({-1, batch.observations.size(2),
                                                batch.observations.size(3),
@@ -298,9 +301,10 @@ int main(int argc, char **argv) {
       "tfevents." + std::to_string(start_time));
   const auto video_path = std::filesystem::path(argv[3]);
   const std::string group_name = argv[4];
+  const auto config = load_config(std::filesystem::path(argv[5]));
   std::filesystem::path profile_path;
-  if (argc == 6) {
-    profile_path = std::filesystem::path(argv[5]);
+  if (argc == 7) {
+    profile_path = std::filesystem::path(argv[6]);
   }
   torch::Device device(torch::kCPU);
   if (torch::cuda::is_available()) {
@@ -379,13 +383,14 @@ int main(int argc, char **argv) {
         .lr(config.learning_rate *
             (1.0 - rollout_index / static_cast<double>(config.num_rollouts)));
     result = rollout.rollout();
-    train_batch(device, network, optimizer, metrics, indices, result.batch);
+    train_batch(device, network, optimizer, metrics, indices, result.batch,
+                config);
     log_data(logger, result.log, metrics);
     sum += std::accumulate(result.log.episode_returns.begin(),
                            result.log.episode_returns.end(), 0.0f);
     count += result.log.episode_returns.size();
     if (config.log_episode_frequency > 0)
-      record(video_path, episode, recording, recorder, result.batch);
+      record(video_path, episode, recording, recorder, result.batch, config);
     index = (index + 1) % config.num_workers;
     ++rollout_index;
   }

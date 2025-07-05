@@ -10,5 +10,6 @@ cc_binary(
         "@arcade_learning_environment//:ale",
         "@libtorch//:torch",
         "@tensorboard_logger",
+        "@yaml-cpp//:yaml-cpp",
     ],
 )

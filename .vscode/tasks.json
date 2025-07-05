@@ -32,10 +32,15 @@
             "args": [
                 "run",
                 "--compilation_mode=opt",
-                "//src:ale_libtorch_example",
+                "//src/bin:ale_ppo_threaded",
+                "--jobs",
+                "auto",
                 "--",
                 "${workspaceFolder}/roms/breakout.bin",
-                "${workspaceFolder}/logs/ppo/tfevents.out.tfevents",
+                "${workspaceFolder}/logs/05-07-25-v0/tfevents.out.tfevents",
+                "${workspaceFolder}/images/05-07-25-v0",
+                "05-07-25-v0",
+                "${workspaceFolder}/configs/v0.yaml"
             ],
             "label": "run",
             "type": "shell",

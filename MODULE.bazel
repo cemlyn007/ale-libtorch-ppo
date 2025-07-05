@@ -54,6 +54,8 @@ git_override(
 )
 bazel_dep(name = "stb", version = "0.0.0-20241109-5c20573")
 
+bazel_dep(name = "yaml-cpp", version = "0.8.0")
+
 bazel_dep(name = "googletest", version = "1.17.0")
 git_override(
     module_name = "googletest",

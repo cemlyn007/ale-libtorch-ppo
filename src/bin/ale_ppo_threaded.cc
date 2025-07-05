@@ -49,6 +49,39 @@ struct Config {
   size_t frame_skip;
 };
 
+google::protobuf::Value get_value(double value) {
+  google::protobuf::Value val;
+  val.set_number_value(value);
+  return val;
+}
+
+std::map<std::string, google::protobuf::Value>
+get_hparams(const Config &config) {
+  std::map<std::string, google::protobuf::Value> hparams;
+  hparams["total_environments"] = get_value(config.total_environments);
+  hparams["hidden_size"] = get_value(config.hidden_size);
+  hparams["action_size"] = get_value(config.action_size);
+  hparams["horizon"] = get_value(config.horizon);
+  hparams["max_steps"] = get_value(config.max_steps);
+  hparams["frame_stack"] = get_value(config.frame_stack);
+  hparams["learning_rate"] = get_value(config.learning_rate);
+  hparams["clip_param"] = get_value(config.clip_param);
+  hparams["value_loss_coef"] = get_value(config.value_loss_coef);
+  hparams["entropy_coef"] = get_value(config.entropy_coef);
+  hparams["num_epochs"] = get_value(config.num_epochs);
+  hparams["mini_batch_size"] = get_value(config.mini_batch_size);
+  hparams["num_mini_batches"] = get_value(config.num_mini_batches);
+  hparams["gae_discount"] = get_value(config.gae_discount);
+  hparams["gae_lambda"] = get_value(config.gae_lambda);
+  hparams["max_gradient_norm"] = get_value(config.max_gradient_norm);
+  hparams["num_rollouts"] = get_value(config.num_rollouts);
+  hparams["log_episode_frequency"] = get_value(config.log_episode_frequency);
+  hparams["num_workers"] = get_value(config.num_workers);
+  hparams["worker_batch_size"] = get_value(config.worker_batch_size);
+  hparams["frame_skip"] = get_value(config.frame_skip);
+  return hparams;
+}
+
 static const Config config = {
     3072,   // total_environments
     256,    // hidden_size
@@ -257,20 +290,17 @@ void train_batch(torch::Device &device, Network &network,
                                  config.num_mini_batches, hp);
 }
 
-// Note: The current implementation doesn't use locks for when training
-// and action sampling in the rollouts. LibTorch sounds like it is not
-// thread-safe, so it may make sense to use a mutex here if stability issues
-// arise.
 int main(int argc, char **argv) {
-  const auto rom_path = argv[1];
+  const auto start_time =
+      std::chrono::system_clock::now().time_since_epoch().count();
+  const auto rom_path = std::filesystem::path(argv[1]);
   const auto logger_path = std::filesystem::path(argv[2]).replace_extension(
-      "tfevents." +
-      std::to_string(
-          std::chrono::system_clock::now().time_since_epoch().count()));
+      "tfevents." + std::to_string(start_time));
   const auto video_path = std::filesystem::path(argv[3]);
+  const std::string group_name = argv[4];
   std::filesystem::path profile_path;
-  if (argc == 5) {
-    profile_path = std::filesystem::path(argv[4]);
+  if (argc == 6) {
+    profile_path = std::filesystem::path(argv[5]);
   }
   torch::Device device(torch::kCPU);
   if (torch::cuda::is_available()) {
@@ -303,8 +333,8 @@ int main(int argc, char **argv) {
                                torch::optim::AdamOptions(config.learning_rate));
 
   ai::rollout::Rollout rollout(
-      std::filesystem::path(rom_path), config.total_environments,
-      config.horizon, config.max_steps, config.frame_stack,
+      rom_path, config.total_environments, config.horizon, config.max_steps,
+      config.frame_stack,
       [&network, &device, action_size = config.action_size](
           const torch::Tensor &obs) -> ai::rollout::ActionResult {
         network->eval();
@@ -325,6 +355,8 @@ int main(int argc, char **argv) {
                    torch::TensorOptions().dtype(torch::kLong).device(device));
   ai::ppo::train::Metrics metrics(config.num_epochs, config.num_mini_batches,
                                   config.mini_batch_size, device);
+
+  logger.add_hparams(get_hparams(config), group_name, start_time);
   size_t rollout_index = 0;
   size_t index = 0;
   ai::rollout::RolloutResult result;

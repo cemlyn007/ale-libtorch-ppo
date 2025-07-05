@@ -35,6 +35,9 @@
             "cwd": "${workspaceFolder}/bazel-bin/src/ale_libtorch_example.runfiles/_main/src",
             "args": [
                 "${workspaceFolder}/roms/breakout.bin",
+                "${workspaceFolder}/logs/ppo/tfevents.out.tfevents",
+                "${workspaceFolder}/images/debug",
+                "debug_group",
             ],
             "sourceMap": {
                 ".": "${workspaceFolder}"

@@ -13,6 +13,7 @@ cc_library(
                 "lib/libnnapi_backend.so",
                 "lib/libnvrtc-builtins.so",
                 "lib/libtorch_python.so",
+                "lib/libprotobuf.a",
             ],
         ),
         "@platforms//os:macos": ["lib/libtorch.dylib"],
@@ -31,7 +32,6 @@ cc_library(
         ":omp",
         ":torch_cpu",
     ],
-    alwayslink = True,
 )
 
 cc_library(
@@ -53,7 +53,6 @@ cc_library(
         ":c10",
         ":omp",
     ],
-    alwayslink = True,
 )
 
 cc_import(

@@ -6,6 +6,8 @@ module(
     version = "0.1.0",
 )
 
+bazel_dep(name = "protobuf", version = "31.1")
+
 bazel_dep(name = "rules_cc", version = "0.1.1")
 bazel_dep(name = "rules_foreign_cc", version = "0.15.0")
 
@@ -29,7 +31,7 @@ bazel_dep(name = "platforms", version = "0.0.11")
 bazel_dep(name = "tensorboard_logger")
 git_override(
     module_name = "tensorboard_logger",
-    commit = "18096201dfa74a52493bdd0f60b270689ac111e7",
+    commit = "f706838d41a19f328d89a1b2c7fdd92545894016",
     remote = "https://github.com/cemlyn007/tensorboard_logger.git",
 )
 

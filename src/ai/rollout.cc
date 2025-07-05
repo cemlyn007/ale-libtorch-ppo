@@ -111,7 +111,6 @@ void Rollout::update_observations() {
 }
 
 RolloutResult Rollout::rollout() {
-
   std::vector<float> episode_returns;
   std::vector<size_t> episode_lengths;
 
@@ -121,23 +120,21 @@ RolloutResult Rollout::rollout() {
 
     // Action Selection
     action_result = action_selector_(observations_);
+    const auto actions = action_result.actions;
+    const auto is_episode_start = is_episode_start_.to(torch::kCPU);
     for (size_t ale_index = 0; ale_index < total_environments_; ++ale_index) {
-      auto ale_action_set = ales_[ale_index]->getMinimalActionSet();
-      int64_t action_index =
-          action_result.actions[static_cast<int64_t>(ale_index)]
-              .item<int64_t>();
-      if (action_index < 0 ||
-          action_index >= static_cast<int64_t>(ale_action_set.size())) {
+      auto action_set = ales_[ale_index]->getMinimalActionSet();
+      int64_t action_index = actions[ale_index].item<int64_t>();
+      if (action_index < 0 || action_index >= action_set.size())
         throw std::out_of_range("Action index out of range for environment " +
                                 std::to_string(ale_index));
-      }
-      auto action = ale_action_set[action_index];
-      step_inputs[ale_index] = StepInput{
-          ale_index, action, is_episode_start_[ale_index].item<bool>()};
+      auto action = action_set[action_index];
+      bool episode_start = is_episode_start[ale_index].item<bool>();
+      step_inputs[ale_index] = StepInput{ale_index, action, episode_start};
     }
 
     // Step all environments with the selected actions.
-    auto step_results = step_all(step_inputs);
+    const auto step_results = step_all(step_inputs);
     for (const auto &result : step_results) {
       int64_t ale_index = result.environment_index;
       if (!step_inputs[ale_index].is_episode_start) {
@@ -176,12 +173,11 @@ RolloutResult Rollout::rollout() {
     }
     total_steps_ += total_environments_;
   }
-
   action_result = action_selector_(observations_);
-  auto batch = buffer_.get(action_result.values, gae_discount_, gae_lambda_);
-
-  Log log{total_steps_, current_episode_, episode_returns, episode_lengths};
-
+  const auto batch =
+      buffer_.get(action_result.values, gae_discount_, gae_lambda_);
+  const Log log{total_steps_, current_episode_, episode_returns,
+                episode_lengths};
   return {batch, log};
 }
 

@@ -56,6 +56,11 @@ Rollout::Rollout(
            static_cast<int>(max_steps_));
     screen_width_ = ales_.back()->getScreen().width();
     screen_height_ = ales_.back()->getScreen().height();
+    screen_buffers_.push_back(
+        std::vector<unsigned char>(screen_height_ * screen_width_));
+    screen_tensor_blobs_.push_back(
+        torch::from_blob(screen_buffers_.back().data(),
+                         {screen_height_, screen_width_}, torch::kByte));
   }
 
   auto total = static_cast<int64_t>(total_environments_);
@@ -97,11 +102,8 @@ void Rollout::update_observations() {
         {torch::indexing::Slice(), frame_index},
         observations_.index({torch::indexing::Slice(), frame_index - 1}));
   }
-  std::vector<unsigned char> gray_scale(screen_height_ * screen_width_);
-  auto frame = torch::from_blob(gray_scale.data(),
-                                {screen_height_, screen_width_}, torch::kByte);
   for (size_t i = 0; i < total_environments_; ++i) {
-    ales_[i]->getScreenGrayscale(gray_scale);
+    const auto &frame = screen_tensor_blobs_[i];
     if (is_episode_start_[i].item<bool>()) {
       observations_.select(0, i).copy_(frame);
     } else {
@@ -124,7 +126,7 @@ RolloutResult Rollout::rollout() {
     const auto is_episode_start = is_episode_start_.to(torch::kCPU);
     for (size_t ale_index = 0; ale_index < total_environments_; ++ale_index) {
       auto action_set = ales_[ale_index]->getMinimalActionSet();
-      int64_t action_index = actions[ale_index].item<int64_t>();
+      size_t action_index = actions[ale_index].item<int64_t>();
       if (action_index < 0 || action_index >= action_set.size())
         throw std::out_of_range("Action index out of range for environment " +
                                 std::to_string(ale_index));
@@ -211,6 +213,8 @@ StepResult Rollout::step(const StepInput &input) {
     output.truncated = (!output.terminated) &&
                        ales_[input.environment_index]->game_truncated();
   }
+  ales_[input.environment_index]->getScreenGrayscale(
+      screen_buffers_[input.environment_index]);
   return output;
 }
 } // namespace ai::rollout

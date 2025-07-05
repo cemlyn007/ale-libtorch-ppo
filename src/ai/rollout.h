@@ -64,6 +64,8 @@ private:
   std::vector<std::unique_ptr<ale::ALEInterface>> ales_;
   std::string rom_path_;
   ai::buffer::Buffer buffer_;
+  std::vector<std::vector<unsigned char>> screen_buffers_;
+  std::vector<torch::Tensor> screen_tensor_blobs_;
   torch::Tensor observations_;
   size_t total_environments_;
   size_t horizon_;

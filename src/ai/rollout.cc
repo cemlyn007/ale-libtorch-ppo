@@ -114,14 +114,16 @@ void Rollout::update_observations() {
 }
 
 RolloutResult Rollout::rollout() {
-  update_observations();
-  ActionResult action_result = action_selector_(observations_);
 
   std::vector<float> episode_returns;
   std::vector<size_t> episode_lengths;
 
+  ActionResult action_result;
   std::vector<StepInput> step_inputs(total_environments_);
   for (size_t time_index = 0; time_index < horizon_; time_index++) {
+
+    // Action Selection
+    action_result = action_selector_(observations_);
     for (size_t ale_index = 0; ale_index < total_environments_; ++ale_index) {
       auto ale_action_set = ales_[ale_index]->getMinimalActionSet();
       int64_t action_index =
@@ -137,8 +139,8 @@ RolloutResult Rollout::rollout() {
           ale_index, action, is_episode_start_[ale_index].item<bool>()};
     }
 
+    // Step all environments with the selected actions.
     auto step_results = step_all(step_inputs);
-
     for (const auto &result : step_results) {
       int64_t ale_index = result.environment_index;
       if (!step_inputs[ale_index].is_episode_start) {
@@ -156,7 +158,8 @@ RolloutResult Rollout::rollout() {
                 is_truncated_, is_episode_start_, action_result.logits,
                 action_result.values);
 
-    // Get the next observations after taking actions.
+    // Get the next observations after taking actions and saving the
+    // observations.
     update_observations();
 
     for (const auto &result : step_results) {
@@ -174,12 +177,10 @@ RolloutResult Rollout::rollout() {
         is_episode_start_[ale_index] = false;
       }
     }
-
-    // Select actions for the next step.
-    action_result = action_selector_(observations_);
     total_steps_ += total_environments_;
   }
 
+  action_result = action_selector_(observations_);
   auto batch = buffer_.get(action_result.values, gae_discount_, gae_lambda_);
 
   Log log{total_steps_, current_episode_, episode_returns, episode_lengths};
@@ -214,8 +215,8 @@ StepResult Rollout::step(const StepInput &input) {
   } else {
     output.reward = ales_[input.environment_index]->act(input.action);
     output.terminated = ales_[input.environment_index]->game_over(false);
-    output.truncated =
-        (!output.terminated) & ales_[input.environment_index]->game_truncated();
+    output.truncated = (!output.terminated) &&
+                       ales_[input.environment_index]->game_truncated();
   }
   return output;
 }

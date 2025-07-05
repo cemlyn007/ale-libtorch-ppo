@@ -72,7 +72,7 @@ struct Metrics {
     returns = torch::empty_like(loss);
     masks = torch::empty({num_epochs, num_mini_batches, mini_batch_size},
                          options.dtype(torch::kBool));
-    clipped_gradients = torch::empty({num_epochs, num_mini_batches});
+    clipped_gradients = torch::empty({num_epochs, num_mini_batches}, options);
   }
 
   void set(size_t epoch_index, size_t mini_batch_index,
@@ -105,7 +105,7 @@ mini_batch_update(Network &network, torch::optim::Optimizer &optimizer,
       hyperparameters.entropy_coef);
   optimizer.zero_grad();
   ppo_metrics.loss.backward();
-  auto clipped_gradient = torch::nn::utils::clip_grad_norm_(
+  double clipped_gradient = torch::nn::utils::clip_grad_norm_(
       network->parameters(), hyperparameters.max_gradient_norm, 2.0, true);
   optimizer.step();
   return MiniBatchUpdateResult{ppo_metrics, clipped_gradient};

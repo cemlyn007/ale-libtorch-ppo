@@ -11,6 +11,17 @@ struct Batch {
   torch::Tensor values;
   torch::Tensor advantages;
   torch::Tensor returns;
+
+  void copy_(const Batch &other) {
+    observations.copy_(other.observations);
+    actions.copy_(other.actions);
+    rewards.copy_(other.rewards);
+    masks.copy_(other.masks);
+    logits.copy_(other.logits);
+    values.copy_(other.values);
+    advantages.copy_(other.advantages);
+    returns.copy_(other.returns);
+  }
 };
 
 class Buffer {

@@ -2,6 +2,7 @@
 build --action_env=BAZEL_CXXOPTS="-std=c++20"
 build --cxxopt='-Wall'
 build --cxxopt='-Werror'
+build:opt --cxxopt='-O3'
 
 # Test options
 test --test_output=errors
@@ -10,5 +11,6 @@ test --test_output=errors
 build:dbg --action_env=CUDA_LAUNCH_BLOCKING=1
 build:dbg --action_env=TORCH_USE_CUDA_DSA=1
 build:dbg --features=oso_prefix_is_pwd
+build:opt --cxxopt='-DTORCH_USE_CUDA_DSA=1'
 
 test: --test_output=all

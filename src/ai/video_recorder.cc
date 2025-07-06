@@ -29,7 +29,8 @@ void VideoRecorder::complete(std::filesystem::path &path) {
     throw std::runtime_error("No frames to write to video");
   }
   std::string command = "ffmpeg -framerate " + std::to_string(fps_) +
-                        " -f image2pipe -c:v png -i - -c:v libx264 -y " +
+                        " -hide_banner -loglevel error -f image2pipe -c:v png "
+                        "-i - -c:v libx264 -y " +
                         path.string();
   auto stream = popen(command.data(), "w");
   if (!stream) {

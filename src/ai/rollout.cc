@@ -46,6 +46,8 @@ Rollout::Rollout(
 
   for (size_t i = 0; i < total_environments_; i++) {
     ales_.push_back(std::make_unique<ale::ALEInterface>());
+    // TODO: I think, I want to implement a wrapper that is more like
+    //  the EpisodicLifeEnv.
     ales_.back()->setBool("truncate_on_loss_of_life", true);
     ales_.back()->setInt("max_num_frames_per_episode", max_steps_);
     ales_.back()->setInt("frame_skip", static_cast<int>(frame_skip));
@@ -74,7 +76,9 @@ Rollout::Rollout(
   rewards_ = torch::zeros({total}, options);
 
   episode_returns_.resize(total_environments_, 0.0f);
+  std::fill(episode_returns_.begin(), episode_returns_.end(), 0.0);
   episode_lengths_.resize(total_environments_, 0);
+  std::fill(episode_lengths_.begin(), episode_lengths_.end(), 0);
 
   std::cout << "Creating " << num_workers << " worker threads." << std::endl;
   for (size_t i = 0; i < num_workers; ++i) {
@@ -136,6 +140,7 @@ RolloutResult Rollout::rollout() {
     }
 
     // Step all environments with the selected actions.
+    size_t total_steps_increment = 0;
     const auto step_results = step_all(step_inputs);
     for (const auto &result : step_results) {
       int64_t ale_index = result.environment_index;
@@ -144,7 +149,9 @@ RolloutResult Rollout::rollout() {
         is_terminated_[ale_index] = result.terminated;
         is_truncated_[ale_index] = result.truncated;
         episode_returns_[ale_index] += result.reward;
-        episode_lengths_[ale_index]++;
+        size_t episode_length = ales_[ale_index]->getEpisodeFrameNumber();
+        total_steps_increment += (episode_length - episode_lengths_[ale_index]);
+        episode_lengths_[ale_index] = episode_length;
       }
     }
 
@@ -173,7 +180,7 @@ RolloutResult Rollout::rollout() {
         is_episode_start_[ale_index] = false;
       }
     }
-    total_steps_ += total_environments_;
+    total_steps_ += total_steps_increment;
   }
   action_result = action_selector_(observations_);
   const auto batch =

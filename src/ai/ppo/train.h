@@ -1,4 +1,7 @@
 #include "ai/ppo/losses.h"
+#include <ATen/cuda/CUDAEvent.h>
+#include <ATen/cuda/CUDAGraph.h>
+#include <c10/cuda/CUDAStream.h>
 #include <torch/torch.h>
 
 namespace ai::ppo::train {
@@ -39,11 +42,20 @@ struct Batch {
         log_probabilities.slice(0, start, end), advantages.slice(0, start, end),
         returns.slice(0, start, end),           masks.slice(0, start, end)};
   }
+
+  void copy_(const Batch &other) {
+    observations.copy_(other.observations);
+    actions.copy_(other.actions);
+    log_probabilities.copy_(other.log_probabilities);
+    advantages.copy_(other.advantages);
+    returns.copy_(other.returns);
+    masks.copy_(other.masks);
+  }
 };
 
 struct MiniBatchUpdateResult {
   ai::ppo::losses::Metrics ppo;
-  double clipped_gradient;
+  torch::Tensor clipped_gradient;
 };
 
 struct Metrics {
@@ -92,6 +104,9 @@ struct Metrics {
   }
 };
 
+torch::Tensor clip_grad_norm_(const std::vector<torch::Tensor> &parameters,
+                              double max_norm);
+
 template <NetworkModel Network>
 MiniBatchUpdateResult
 mini_batch_update(Network &network, torch::optim::Optimizer &optimizer,
@@ -105,8 +120,8 @@ mini_batch_update(Network &network, torch::optim::Optimizer &optimizer,
       hyperparameters.entropy_coef);
   optimizer.zero_grad();
   ppo_metrics.loss.backward();
-  double clipped_gradient = torch::nn::utils::clip_grad_norm_(
-      network->parameters(), hyperparameters.max_gradient_norm, 2.0, true);
+  auto clipped_gradient =
+      clip_grad_norm_(network->parameters(), hyperparameters.max_gradient_norm);
   optimizer.step();
   return MiniBatchUpdateResult{ppo_metrics, clipped_gradient};
 }
@@ -136,4 +151,44 @@ void train(Network &network, torch::optim::Optimizer &optimizer,
     }
   }
 }
+
+void stream_sync(at::cuda::CUDAStream &dependency,
+                 at::cuda::CUDAStream &dependent);
+
+template <NetworkModel Network>
+void capture_train_cuda_graph(at::cuda::CUDAGraph &graph, Network &network,
+                              torch::optim::Optimizer &optimizer,
+                              Metrics &metrics, torch::Tensor &indices,
+                              Batch &batch, size_t num_epochs,
+                              size_t num_mini_batches,
+                              Hyperparameters &hyperparameters,
+                              int num_warmup_iters) {
+
+  auto warmup_stream = at::cuda::getStreamFromPool();
+  auto capture_stream = at::cuda::getStreamFromPool();
+  auto legacy_stream = at::cuda::getCurrentCUDAStream();
+
+  at::cuda::setCurrentCUDAStream(warmup_stream);
+
+  stream_sync(legacy_stream, warmup_stream);
+
+  for (C10_UNUSED const auto iter : c10::irange(num_warmup_iters)) {
+    train(network, optimizer, metrics, indices, batch, num_epochs,
+          num_mini_batches, hyperparameters);
+  }
+
+  stream_sync(warmup_stream, capture_stream);
+  at::cuda::setCurrentCUDAStream(capture_stream);
+
+  graph.capture_begin();
+  train(network, optimizer, metrics, indices, batch, num_epochs,
+        num_mini_batches, hyperparameters);
+  graph.capture_end();
+
+  stream_sync(capture_stream, legacy_stream);
+  at::cuda::setCurrentCUDAStream(legacy_stream);
+}
+
+void train_cuda_graph(at::cuda::CUDAGraph &graph);
+
 } // namespace ai::ppo::train

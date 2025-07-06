@@ -56,6 +56,20 @@ bazel_dep(name = "stb", version = "0.0.0-20241109-5c20573")
 
 bazel_dep(name = "yaml-cpp", version = "0.8.0")
 
+bazel_dep(name = "rules_cuda")
+git_override(
+    module_name = "rules_cuda",
+    remote = "https://github.com/bazel-contrib/rules_cuda.git",
+    commit = "1bc391d927066ff35291186aa7a51d37f92f44f3",
+)
+
+cuda = use_extension("@rules_cuda//cuda:extensions.bzl", "toolchain")
+cuda.toolkit(
+    name = "cuda",
+    toolkit_path = "",
+)
+use_repo(cuda, "cuda")
+
 bazel_dep(name = "googletest", version = "1.17.0")
 git_override(
     module_name = "googletest",

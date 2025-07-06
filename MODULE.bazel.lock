@@ -193,6 +193,48 @@
         ]
       }
     },
+    "@@rules_cuda+//cuda:extensions.bzl%toolchain": {
+      "general": {
+        "bzlTransitiveDigest": "PCc5fztyozVZykRr2KwRS46NyUg9BXP7HwgufplbFAs=",
+        "usagesDigest": "11aht1NSGElb7vi38r7wqQNjINLZt6I6eCLZYo4ExYw=",
+        "recordedFileInputs": {},
+        "recordedDirentsInputs": {},
+        "envVariables": {},
+        "generatedRepoSpecs": {
+          "cuda": {
+            "repoRuleId": "@@rules_cuda+//cuda/private:repositories.bzl%cuda_toolkit",
+            "attributes": {
+              "components_mapping": {},
+              "nvcc_version": "",
+              "toolkit_path": "/usr/local/cuda-12.8",
+              "version": ""
+            }
+          }
+        },
+        "recordedRepoMappingEntries": [
+          [
+            "bazel_tools",
+            "rules_cc",
+            "rules_cc+"
+          ],
+          [
+            "rules_cc+",
+            "bazel_tools",
+            "bazel_tools"
+          ],
+          [
+            "rules_cc+",
+            "rules_cc",
+            "rules_cc+"
+          ],
+          [
+            "rules_cuda+",
+            "bazel_tools",
+            "bazel_tools"
+          ]
+        ]
+      }
+    },
     "@@rules_foreign_cc+//foreign_cc:extensions.bzl%tools": {
       "general": {
         "bzlTransitiveDigest": "MW4A97mMGuraW70byeL5iUdP+6qprG8t1UShiMJdD8s=",

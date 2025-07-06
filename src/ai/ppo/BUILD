@@ -22,10 +22,12 @@ cc_library(
 
 cc_library(
     name = "train",
+    srcs = ["train.cc"],
     hdrs = ["train.h"],
     strip_include_prefix = "/src",
     deps = [
         ":losses",
+        "@cuda//:cuda_headers",
         "@libtorch//:torch",
     ],
 )

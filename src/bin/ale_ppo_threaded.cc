@@ -109,15 +109,6 @@ Config load_config(const std::filesystem::path &path) {
   return config;
 }
 
-struct Batch {
-  torch::Tensor observations;
-  torch::Tensor actions;
-  torch::Tensor logits;
-  torch::Tensor advantages;
-  torch::Tensor returns;
-  torch::Tensor masks;
-};
-
 float mean(const torch::Tensor &tensor, const torch::Tensor &mask) {
   auto masked_tensor = tensor.masked_select(mask);
   return masked_tensor.mean().item<float>();
@@ -291,18 +282,6 @@ ai::ppo::train::Hyperparameters prepare_hyperparameters(const Config &config) {
   return hp;
 }
 
-void train_batch(torch::Device &device, Network &network,
-                 torch::optim::Optimizer &optimizer,
-                 ai::ppo::train::Metrics &metrics, torch::Tensor &indices,
-                 ai::buffer::Batch &batch, const Config &config) {
-  network->train();
-  auto other_batch = prepare_batch(batch);
-  auto hp = prepare_hyperparameters(config);
-  ai::ppo::train::train<Network>(network, optimizer, metrics, indices,
-                                 other_batch, config.num_epochs,
-                                 config.num_mini_batches, hp);
-}
-
 int main(int argc, char **argv) {
   const auto start_time =
       std::chrono::system_clock::now().time_since_epoch().count();
@@ -373,7 +352,22 @@ int main(int argc, char **argv) {
   logger.add_hparams(get_hparams(config), group_name, start_time);
   size_t rollout_index = 0;
   size_t index = 0;
+  ai::buffer::Batch b;
+  {
+    torch::NoGradGuard no_grad;
+    b = rollout.rollout().batch;
+  }
+  ai::ppo::train::Batch batch = prepare_batch(b);
   ai::rollout::RolloutResult result;
+
+  at::cuda::CUDAGraph graph;
+  network->train();
+  {
+    auto hp = prepare_hyperparameters(config);
+    ai::ppo::train::capture_train_cuda_graph(graph, network, optimizer, metrics,
+                                             indices, batch, config.num_epochs,
+                                             config.num_mini_batches, hp, 10);
+  }
   if (!profile_path.empty()) {
     torch::autograd::profiler::ProfilerConfig profiler_config =
         torch::autograd::profiler::ProfilerConfig(
@@ -392,9 +386,15 @@ int main(int argc, char **argv) {
         optimizer.param_groups()[0].options())
         .lr(config.learning_rate *
             (1.0 - rollout_index / static_cast<double>(config.num_rollouts)));
-    result = rollout.rollout();
-    train_batch(device, network, optimizer, metrics, indices, result.batch,
-                config);
+
+    {
+      torch::NoGradGuard no_grad;
+      result = rollout.rollout();
+      auto b = prepare_batch(result.batch);
+      batch.copy_(b);
+    }
+    ai::ppo::train::train_cuda_graph(graph);
+
     log_data(logger, result.log, metrics);
     sum += std::accumulate(result.log.episode_returns.begin(),
                            result.log.episode_returns.end(), 0.0f);

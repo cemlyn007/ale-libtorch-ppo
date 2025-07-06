@@ -267,11 +267,8 @@ void initialize_weights(torch::nn::Module &module) {
   }
 }
 
-void train_batch(torch::Device &device, Network &network,
-                 torch::optim::Optimizer &optimizer,
-                 ai::ppo::train::Metrics &metrics, torch::Tensor &indices,
-                 ai::buffer::Batch &batch, const Config &config) {
-  network->train();
+ai::ppo::train::Batch prepare_batch(ai::buffer::Batch &batch) {
+
   auto observations = batch.observations.view({-1, batch.observations.size(2),
                                                batch.observations.size(3),
                                                batch.observations.size(4)});
@@ -283,11 +280,24 @@ void train_batch(torch::Device &device, Network &network,
   auto log_probabilities = ai::ppo::losses::normalize_logits(logits);
   ai::ppo::train::Batch other_batch = {observations, actions, log_probabilities,
                                        advantages,   returns, masks};
+  return other_batch;
+}
 
+ai::ppo::train::Hyperparameters prepare_hyperparameters(const Config &config) {
   ai::ppo::train::Hyperparameters hp = {
       config.clip_param, config.value_loss_coef,
       static_cast<float>(get_annealed_entropy_coef(config.entropy_coef)),
       config.max_gradient_norm};
+  return hp;
+}
+
+void train_batch(torch::Device &device, Network &network,
+                 torch::optim::Optimizer &optimizer,
+                 ai::ppo::train::Metrics &metrics, torch::Tensor &indices,
+                 ai::buffer::Batch &batch, const Config &config) {
+  network->train();
+  auto other_batch = prepare_batch(batch);
+  auto hp = prepare_hyperparameters(config);
   ai::ppo::train::train<Network>(network, optimizer, metrics, indices,
                                  other_batch, config.num_epochs,
                                  config.num_mini_batches, hp);

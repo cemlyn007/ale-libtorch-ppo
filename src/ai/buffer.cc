@@ -61,6 +61,9 @@ Batch Buffer::get(const torch::Tensor &next_values, float discount,
   // It should return a reference to a Batch object containing the data
   // from the buffer, possibly using the final value function estimates
   // for the last observations.
+  if (indices_ != 0)
+    throw std::runtime_error("Buffer is not full, cannot compute GAE.");
+
   rewards_.clamp_(-1.0f, 1.0f);
   ai::gae::gae(advantages_, rewards_, values_, next_values, terminals_,
                truncations_, episode_starts_, discount, lambda);

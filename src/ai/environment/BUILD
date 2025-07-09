@@ -44,3 +44,17 @@ cc_library(
         "@arcade_learning_environment//:ale",
     ],
 )
+
+cc_library(
+    name = "noop_reset",
+    srcs = [
+        "noop_reset.cc",
+    ],
+    hdrs = [
+        "noop_reset.h",
+    ],
+    strip_include_prefix = "/src",
+    deps = [
+        ":environment",
+    ],
+)

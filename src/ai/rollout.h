@@ -1,7 +1,5 @@
 #include "ai/buffer.h"
 #include "ai/environment/environment.h"
-#include "ai/environment/episode_life.h"
-#include "ai/environment/episode_recorder.h"
 #include "ai/queue.h"
 #include <atomic>
 #include <filesystem>
@@ -84,7 +82,8 @@ private:
   std::function<ActionResult(const torch::Tensor &)> action_selector_;
   torch::Device device_;
 
-  std::vector<std::unique_ptr<ai::environment::EpisodeLife>> environments_;
+  std::vector<std::unique_ptr<ai::environment::VirtualEnvironment>>
+      environments_;
 
   std::atomic<bool> stop_;
 

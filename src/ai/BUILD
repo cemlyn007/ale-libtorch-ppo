@@ -12,6 +12,7 @@ cc_library(
         "//src/ai/environment",
         "//src/ai/environment:episode_life",
         "//src/ai/environment:episode_recorder",
+        "//src/ai/environment:noop_reset",
         "@arcade_learning_environment//:ale",
         "@libtorch//:torch",
     ],

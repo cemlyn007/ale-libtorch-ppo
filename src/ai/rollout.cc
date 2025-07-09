@@ -1,5 +1,8 @@
 #include "rollout.h"
-#include "gae.h"
+#include "ai/environment/episode_life.h"
+#include "ai/environment/episode_recorder.h"
+#include "ai/environment/noop_reset.h"
+#include "ai/gae.h"
 #include <cassert>
 
 namespace ai::rollout {
@@ -47,19 +50,20 @@ Rollout::Rollout(
   }
 
   for (size_t i = 0; i < total_environments_; i++) {
-    auto environment = std::make_unique<ai::environment::Environment>(
-        rom_path_, max_steps_, frame_skip, 0.0f, i + seed);
-    std::unique_ptr<ai::environment::EpisodeLife> episode_life;
+    std::unique_ptr<ai::environment::VirtualEnvironment> environment =
+        std::make_unique<ai::environment::Environment>(
+            rom_path_, max_steps_, frame_skip, 0.0f, i + seed);
+
     if (i == 0 && video_path.has_value()) {
-      auto recorder = std::make_unique<ai::environment::EpisodeRecorder>(
+      environment = std::make_unique<ai::environment::EpisodeRecorder>(
           std::move(environment), video_path.value());
-      episode_life =
-          std::make_unique<ai::environment::EpisodeLife>(std::move(recorder));
-    } else {
-      episode_life = std::make_unique<ai::environment::EpisodeLife>(
-          std::move(environment));
     }
-    environments_.emplace_back(std::move(episode_life));
+    // TODO: Make this configurable.
+    environment = std::make_unique<ai::environment::NoopResetEnvironment>(
+        std::move(environment), 30, seed + 1);
+    environment =
+        std::make_unique<ai::environment::EpisodeLife>(std::move(environment));
+    environments_.emplace_back(std::move(environment));
     auto screen = environments_.back()->get_interface().getScreen();
     screen_buffers_.emplace_back(
         std::vector<unsigned char>(screen.height() * screen.width()));

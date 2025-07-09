@@ -1,4 +1,4 @@
-#include "ai/episode_recorder.h"
+#include "ai/environment/episode_recorder.h"
 
 namespace ai::environment {
 

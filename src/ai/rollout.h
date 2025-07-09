@@ -1,7 +1,7 @@
 #include "ai/buffer.h"
-#include "ai/environment.h"
-#include "ai/episode_life.h"
-#include "ai/episode_recorder.h"
+#include "ai/environment/environment.h"
+#include "ai/environment/episode_life.h"
+#include "ai/environment/episode_recorder.h"
 #include "ai/queue.h"
 #include <atomic>
 #include <filesystem>

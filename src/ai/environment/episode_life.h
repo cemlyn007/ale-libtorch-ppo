@@ -1,5 +1,5 @@
 #pragma once
-#include "ai/environment.h"
+#include "ai/environment/environment.h"
 #include <memory>
 
 namespace ai::environment {

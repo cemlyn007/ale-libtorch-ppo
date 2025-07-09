@@ -1,5 +1,5 @@
 #pragma once
-#include "ai/environment.h"
+#include "ai/environment/environment.h"
 #include "ai/video_recorder.h"
 #include <memory>
 

@@ -2,3 +2,4 @@ roms
 bazel-*
 logs
 images
+*.mp4

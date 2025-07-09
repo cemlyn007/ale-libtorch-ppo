@@ -2,7 +2,6 @@
 #include <filesystem>
 #include <stb_image_write.h>
 #include <stdio.h>
-
 namespace ai::video_recorder {
 
 VideoRecorder::VideoRecorder(const std::filesystem::path &video_path,
@@ -29,9 +28,9 @@ void VideoRecorder::complete(std::filesystem::path &path) {
     throw std::runtime_error("No frames to write to video");
   }
   std::string command = "ffmpeg -framerate " + std::to_string(fps_) +
-                        " -hide_banner -loglevel error -f image2pipe -c:v png "
-                        "-i - -c:v libx264 -y " +
-                        path.string();
+                        " -hide_banner -loglevel error -f image2pipe -c:v png"
+                        " -i - -c:v libx264 -y " +
+                        (video_path_ / path).string();
   auto stream = popen(command.data(), "w");
   if (!stream) {
     throw std::runtime_error("Failed to open pipe for ffmpeg");

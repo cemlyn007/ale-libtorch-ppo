@@ -196,7 +196,7 @@
     "@@rules_cuda+//cuda:extensions.bzl%toolchain": {
       "general": {
         "bzlTransitiveDigest": "PCc5fztyozVZykRr2KwRS46NyUg9BXP7HwgufplbFAs=",
-        "usagesDigest": "11aht1NSGElb7vi38r7wqQNjINLZt6I6eCLZYo4ExYw=",
+        "usagesDigest": "LAnzdm1+eoDPsG+bDf+waHOxKhWdheuGFLWn4RubkAk=",
         "recordedFileInputs": {},
         "recordedDirentsInputs": {},
         "envVariables": {},
@@ -206,7 +206,7 @@
             "attributes": {
               "components_mapping": {},
               "nvcc_version": "",
-              "toolkit_path": "/usr/local/cuda-12.8",
+              "toolkit_path": "",
               "version": ""
             }
           }

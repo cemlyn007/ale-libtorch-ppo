@@ -1,7 +1,6 @@
 #include "ai/ppo/losses.h"
 #include "ai/ppo/train.h"
 #include "ai/rollout.h"
-#include "ai/video_recorder.h"
 #include "ai/vision.h"
 #include "tensorboard_logger.h"
 #include <ale/ale_interface.hpp>
@@ -171,35 +170,6 @@ void log_data(TensorBoardLogger &logger, const ai::rollout::Log &log,
                        gather(metrics.returns, metrics.masks));
 }
 
-void record(const std::filesystem::path &video_path, int64_t &episode,
-            bool &recording, ai::video_recorder::VideoRecorder &recorder,
-            ai::buffer::Batch &batch, const Config &config) {
-  const auto new_episodes =
-      batch.masks[0].logical_not().to(torch::kCPU).contiguous();
-  if (recording || new_episodes.sum().item<int64_t>() > 0) {
-    torch::Tensor observations =
-        batch.observations.index({0, torch::indexing::Slice(), 0})
-            .to(torch::kCPU)
-            .contiguous();
-    for (size_t frame = 0; frame < config.horizon; ++frame) {
-      bool new_episode = new_episodes[frame].item<bool>();
-      if (new_episode) {
-        if (recording) {
-          auto path = video_path / (std::to_string(episode) + ".mp4");
-          recorder.complete(path);
-          recording = false;
-        }
-        ++episode;
-      }
-      if (episode % config.log_episode_frequency == 0) {
-        const auto &observation = observations[frame];
-        recorder.add(observation.data_ptr<uint8_t>());
-        recording = true;
-      }
-    }
-  }
-}
-
 struct NetworkImpl : torch::nn::Module {
   NetworkImpl(size_t hidden_size, size_t action_size)
       : sequential(
@@ -310,12 +280,6 @@ int main(int argc, char **argv) {
     std::filesystem::create_directories(video_path);
   }
 
-  // For writing the images
-  int64_t episode = -1;
-  bool recording = false;
-  auto recorder =
-      ai::video_recorder::VideoRecorder(video_path, 1, 160, 210, 30);
-
   torch::manual_seed(42);
 
   TensorBoardLogger logger(logger_path);
@@ -342,7 +306,7 @@ int main(int argc, char **argv) {
                 output.value.ravel()};
       },
       config.gae_discount, config.gae_lambda, device, 0, config.num_workers,
-      config.worker_batch_size, config.frame_skip);
+      config.worker_batch_size, config.frame_skip, video_path);
   torch::Tensor indices =
       torch::empty(config.mini_batch_size * config.num_mini_batches,
                    torch::TensorOptions().dtype(torch::kLong).device(device));
@@ -399,8 +363,6 @@ int main(int argc, char **argv) {
     sum += std::accumulate(result.log.episode_returns.begin(),
                            result.log.episode_returns.end(), 0.0f);
     count += result.log.episode_returns.size();
-    if (config.log_episode_frequency > 0)
-      record(video_path, episode, recording, recorder, result.batch, config);
     index = (index + 1) % config.num_workers;
     ++rollout_index;
   }

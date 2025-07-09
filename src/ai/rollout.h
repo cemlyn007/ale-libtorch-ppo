@@ -1,6 +1,8 @@
 #include "ai/buffer.h"
+#include "ai/environment.h"
+#include "ai/episode_life.h"
+#include "ai/episode_recorder.h"
 #include "ai/queue.h"
-#include "ale/ale_interface.hpp"
 #include <atomic>
 #include <filesystem>
 #include <functional>
@@ -46,7 +48,8 @@ public:
           std::function<ActionResult(const torch::Tensor &)> action_selector,
           float gae_discount, float gae_lambda, const torch::Device &device,
           size_t seed, size_t num_workers, size_t worker_batch_size,
-          size_t frame_skip);
+          size_t frame_skip,
+          std::optional<std::filesystem::path> video_path = std::nullopt);
   ~Rollout();
   RolloutResult rollout();
   void update_observations();
@@ -59,10 +62,7 @@ private:
   std::vector<StepResult> step_all(const std::vector<StepInput> &inputs);
   void worker();
 
-  int64_t screen_width_;
-  int64_t screen_height_;
-  std::vector<std::unique_ptr<ale::ALEInterface>> ales_;
-  std::string rom_path_;
+  std::filesystem::path rom_path_;
   ai::buffer::Buffer buffer_;
   std::vector<std::vector<unsigned char>> screen_buffers_;
   std::vector<torch::Tensor> screen_tensor_blobs_;
@@ -83,6 +83,8 @@ private:
   torch::Tensor rewards_;
   std::function<ActionResult(const torch::Tensor &)> action_selector_;
   torch::Device device_;
+
+  std::vector<std::unique_ptr<ai::environment::EpisodeLife>> environments_;
 
   std::atomic<bool> stop_;
 

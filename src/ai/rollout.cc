@@ -10,9 +10,9 @@ Rollout::Rollout(
     std::function<ActionResult(const torch::Tensor &)> action_selector,
     float gae_discount, float gae_lambda, const torch::Device &device,
     size_t seed, size_t num_workers, size_t worker_batch_size,
-    size_t frame_skip)
-    : gae_discount_(gae_discount), gae_lambda_(gae_lambda), ales_(),
-      rom_path_(rom_path), buffer_([&] {
+    size_t frame_skip, std::optional<std::filesystem::path> video_path)
+    : gae_discount_(gae_discount), gae_lambda_(gae_lambda), rom_path_(rom_path),
+      buffer_([&] {
         ale::ALEInterface ale;
         ale.loadROM(rom_path);
         auto screen = ale.getScreen();
@@ -24,7 +24,8 @@ Rollout::Rollout(
       total_environments_(total_environments), horizon_(horizon),
       frame_stack_(frame_stack), max_steps_(max_steps), is_terminated_(),
       is_truncated_(), is_episode_start_(), action_selector_(action_selector),
-      device_(device), stop_(), batch_size_(worker_batch_size) {
+      device_(device), environments_(), stop_(),
+      batch_size_(worker_batch_size) {
   if (total_environments_ == 0) {
     throw std::invalid_argument("Total environments must be greater than 0.");
   }
@@ -41,35 +42,43 @@ Rollout::Rollout(
     throw std::invalid_argument("ROM path must not be empty.");
   }
   if (!std::filesystem::exists(rom_path_)) {
-    throw std::invalid_argument("ROM file does not exist: " + rom_path_);
+    throw std::invalid_argument(std::string("ROM file does not exist: ") +
+                                rom_path_.string());
   }
 
   for (size_t i = 0; i < total_environments_; i++) {
-    ales_.push_back(std::make_unique<ale::ALEInterface>());
-    // TODO: I think, I want to implement a wrapper that is more like
-    //  the EpisodicLifeEnv.
-    ales_.back()->setBool("truncate_on_loss_of_life", true);
-    ales_.back()->setInt("max_num_frames_per_episode", max_steps_);
-    ales_.back()->setInt("frame_skip", static_cast<int>(frame_skip));
-    ales_.back()->setInt("random_seed", i + seed);
-    ales_.back()->setFloat("repeat_action_probability", 0.0f);
-    ales_.back()->loadROM(rom_path_);
-    assert(ales_.back()->getInt("max_num_frames_per_episode") ==
-           static_cast<int>(max_steps_));
-    screen_width_ = ales_.back()->getScreen().width();
-    screen_height_ = ales_.back()->getScreen().height();
-    screen_buffers_.push_back(
-        std::vector<unsigned char>(screen_height_ * screen_width_));
+    auto environment = std::make_unique<ai::environment::Environment>(
+        rom_path_, max_steps_, frame_skip, 0.0f, i + seed);
+    std::unique_ptr<ai::environment::EpisodeLife> episode_life;
+    if (i == 0 && video_path.has_value()) {
+      auto recorder = std::make_unique<ai::environment::EpisodeRecorder>(
+          std::move(environment), video_path.value());
+      episode_life =
+          std::make_unique<ai::environment::EpisodeLife>(std::move(recorder));
+    } else {
+      episode_life = std::make_unique<ai::environment::EpisodeLife>(
+          std::move(environment));
+    }
+    environments_.emplace_back(std::move(episode_life));
+    auto screen = environments_.back()->get_interface().getScreen();
+    screen_buffers_.emplace_back(
+        std::vector<unsigned char>(screen.height() * screen.width()));
+    environments_.back()->get_interface().getScreenGrayscale(
+        screen_buffers_.back());
     screen_tensor_blobs_.push_back(
         torch::from_blob(screen_buffers_.back().data(),
-                         {screen_height_, screen_width_}, torch::kByte));
+                         {static_cast<int64_t>(screen.height()),
+                          static_cast<int64_t>(screen.width())},
+                         torch::kByte));
   }
 
   auto total = static_cast<int64_t>(total_environments_);
   auto frame = static_cast<int64_t>(frame_stack_);
   auto options = torch::TensorOptions(torch::kFloat32).device(device_);
-  observations_ = torch::zeros({total, frame, screen_height_, screen_width_},
-                               options.dtype(torch::kByte));
+  observations_ =
+      torch::zeros({total, frame, screen_tensor_blobs_.back().size(0),
+                    screen_tensor_blobs_.back().size(1)},
+                   options.dtype(torch::kByte));
   is_terminated_ = torch::zeros({total}, options.dtype(torch::kBool));
   is_truncated_ = torch::zeros({total}, options.dtype(torch::kBool));
   is_episode_start_ = torch::ones({total}, options.dtype(torch::kBool));
@@ -89,23 +98,19 @@ Rollout::Rollout(
 Rollout::~Rollout() {
   stop_ = true;
   std::vector<StepInput> inputs(total_environments_);
-  for (size_t i = 0; i < total_environments_; ++i) {
-    inputs[i] = StepInput{i, ales_[i]->getMinimalActionSet().front(), true};
-  }
+  for (size_t i = 0; i < total_environments_; ++i)
+    inputs[i] = StepInput{i, ale::Action::RANDOM, true};
   action_queue_.push(inputs);
-  for (auto &worker : workers_) {
-    if (worker.joinable()) {
+  for (auto &worker : workers_)
+    if (worker.joinable())
       worker.join();
-    }
-  }
 }
 
 void Rollout::update_observations() {
-  for (int64_t frame_index = frame_stack_ - 1; frame_index > 0; --frame_index) {
+  for (int64_t frame_index = frame_stack_ - 1; frame_index > 0; --frame_index)
     observations_.index_put_(
         {torch::indexing::Slice(), frame_index},
         observations_.index({torch::indexing::Slice(), frame_index - 1}));
-  }
   for (size_t i = 0; i < total_environments_; ++i) {
     const auto &frame = screen_tensor_blobs_[i];
     if (is_episode_start_[i].item<bool>()) {
@@ -129,7 +134,8 @@ RolloutResult Rollout::rollout() {
     const auto actions = action_result.actions;
     const auto is_episode_start = is_episode_start_.to(torch::kCPU);
     for (size_t ale_index = 0; ale_index < total_environments_; ++ale_index) {
-      auto action_set = ales_[ale_index]->getMinimalActionSet();
+      auto &interface = environments_[ale_index]->get_interface();
+      auto action_set = interface.getMinimalActionSet();
       size_t action_index = actions[ale_index].item<int64_t>();
       if (action_index < 0 || action_index >= action_set.size())
         throw std::out_of_range("Action index out of range for environment " +
@@ -149,9 +155,8 @@ RolloutResult Rollout::rollout() {
         is_terminated_[ale_index] = result.terminated;
         is_truncated_[ale_index] = result.truncated;
         episode_returns_[ale_index] += result.reward;
-        size_t episode_length = ales_[ale_index]->getEpisodeFrameNumber();
-        total_steps_increment += (episode_length - episode_lengths_[ale_index]);
-        episode_lengths_[ale_index] = episode_length;
+        episode_lengths_[ale_index]++;
+        total_steps_increment++;
       }
     }
 
@@ -210,17 +215,17 @@ StepResult Rollout::step(const StepInput &input) {
   StepResult output;
   output.environment_index = input.environment_index;
   if (input.is_episode_start) {
-    ales_[input.environment_index]->reset_game();
+    environments_[input.environment_index]->reset();
     output.reward = 0.0f;
     output.terminated = false;
     output.truncated = false;
   } else {
-    output.reward = ales_[input.environment_index]->act(input.action);
-    output.terminated = ales_[input.environment_index]->game_over(false);
-    output.truncated = (!output.terminated) &&
-                       ales_[input.environment_index]->game_truncated();
+    auto result = environments_[input.environment_index]->step(input.action);
+    output.reward = result.reward;
+    output.terminated = result.terminated;
+    output.truncated = result.truncated;
   }
-  ales_[input.environment_index]->getScreenGrayscale(
+  environments_[input.environment_index]->get_interface().getScreenGrayscale(
       screen_buffers_[input.environment_index]);
   return output;
 }

@@ -7,6 +7,9 @@ cc_library(
     strip_include_prefix = "/src",
     deps = [
         ":buffer",
+        ":environment",
+        ":episode_life",
+        ":episode_recorder",
         ":gae",
         ":queue",
         "@arcade_learning_environment//:ale",
@@ -23,6 +26,51 @@ cc_library(
         ":gae",
         "@arcade_learning_environment//:ale",
         "@libtorch//:torch",
+    ],
+)
+
+cc_library(
+    name = "environment",
+    srcs = [
+        "environment.cc",
+    ],
+    hdrs = [
+        "environment.h",
+    ],
+    strip_include_prefix = "/src",
+    deps = [
+        "@arcade_learning_environment//:ale",
+    ],
+)
+
+cc_library(
+    name = "episode_life",
+    srcs = [
+        "episode_life.cc",
+    ],
+    hdrs = [
+        "episode_life.h",
+    ],
+    strip_include_prefix = "/src",
+    deps = [
+        ":environment",
+        "@arcade_learning_environment//:ale",
+    ],
+)
+
+cc_library(
+    name = "episode_recorder",
+    srcs = [
+        "episode_recorder.cc",
+    ],
+    hdrs = [
+        "episode_recorder.h",
+    ],
+    strip_include_prefix = "/src",
+    deps = [
+        ":environment",
+        ":video_recorder",
+        "@arcade_learning_environment//:ale",
     ],
 )
 

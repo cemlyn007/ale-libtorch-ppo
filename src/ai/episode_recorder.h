@@ -5,9 +5,9 @@
 
 namespace ai::environment {
 
-class EpisodeRecorder : public VEnvironment {
+class EpisodeRecorder : public VirtualEnvironment {
 public:
-  explicit EpisodeRecorder(std::unique_ptr<VEnvironment> env,
+  explicit EpisodeRecorder(std::unique_ptr<VirtualEnvironment> env,
                            const std::filesystem::path &video_path);
   void reset() override;
   Step step(const ale::Action &action) override;
@@ -15,7 +15,7 @@ public:
 
 private:
   size_t episode_index_;
-  std::unique_ptr<VEnvironment> env_;
+  std::unique_ptr<VirtualEnvironment> env_;
   std::vector<unsigned char> screen_buffer_;
   ai::video_recorder::VideoRecorder video_recorder_;
 };

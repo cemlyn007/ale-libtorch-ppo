@@ -4,15 +4,15 @@
 
 namespace ai::environment {
 
-class EpisodeLife : public VEnvironment {
+class EpisodeLife : public VirtualEnvironment {
 public:
-  explicit EpisodeLife(std::unique_ptr<VEnvironment> env);
+  explicit EpisodeLife(std::unique_ptr<VirtualEnvironment> env);
   void reset() override;
   Step step(const ale::Action &action) override;
   ale::ALEInterface &get_interface() override;
 
 private:
-  std::unique_ptr<VEnvironment> env_;
+  std::unique_ptr<VirtualEnvironment> env_;
   int lives_;
 };
 

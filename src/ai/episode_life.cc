@@ -2,7 +2,7 @@
 
 namespace ai::environment {
 
-EpisodeLife::EpisodeLife(std::unique_ptr<VEnvironment> env)
+EpisodeLife::EpisodeLife(std::unique_ptr<VirtualEnvironment> env)
     : env_(std::move(env)), lives_(0) {}
 
 void EpisodeLife::reset() {

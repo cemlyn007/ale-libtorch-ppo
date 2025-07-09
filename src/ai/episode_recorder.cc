@@ -2,7 +2,7 @@
 
 namespace ai::environment {
 
-EpisodeRecorder::EpisodeRecorder(std::unique_ptr<VEnvironment> env,
+EpisodeRecorder::EpisodeRecorder(std::unique_ptr<VirtualEnvironment> env,
                                  const std::filesystem::path &video_path)
     : episode_index_(0), env_(std::move(env)), screen_buffer_(),
       video_recorder_([&]() {

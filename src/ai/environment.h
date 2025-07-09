@@ -10,14 +10,14 @@ struct Step {
   bool truncated;
 };
 
-class VEnvironment {
+class VirtualEnvironment {
 public:
   virtual void reset() = 0;
   virtual Step step(const ale::Action &action) = 0;
   virtual ale::ALEInterface &get_interface() = 0;
 };
 
-class Environment : public VEnvironment {
+class Environment : public VirtualEnvironment {
 public:
   Environment(const std::filesystem::path &rom_path,
               size_t max_num_frames_per_episode, size_t frame_skip,

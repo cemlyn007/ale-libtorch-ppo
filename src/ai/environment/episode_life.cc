@@ -17,8 +17,6 @@ ScreenBuffer EpisodeLife::reset() {
   lives_ = env_->get_interface().lives();
   if (lives_ <= 0)
     throw std::runtime_error("No lives left in the environment.");
-  auto fire_result = env_->step(ale::Action::PLAYER_A_FIRE);
-  observation = fire_result.observation;
   return observation;
 }
 

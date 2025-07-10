@@ -1,6 +1,7 @@
 #include "rollout.h"
 #include "ai/environment/episode_life.h"
 #include "ai/environment/episode_recorder.h"
+#include "ai/environment/fire_reset.h"
 #include "ai/environment/max_and_skip.h"
 #include "ai/environment/noop_reset.h"
 #include "ai/gae.h"
@@ -66,6 +67,8 @@ Rollout::Rollout(
         std::move(environment), frame_skip);
     environment =
         std::make_unique<ai::environment::EpisodeLife>(std::move(environment));
+    environment =
+        std::make_unique<ai::environment::FireReset>(std::move(environment));
     environments_.emplace_back(std::move(environment));
     auto screen = environments_.back()->get_interface().getScreen();
     screen_buffers_.emplace_back(

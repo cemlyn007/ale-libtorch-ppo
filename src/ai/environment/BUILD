@@ -46,6 +46,20 @@ cc_library(
 )
 
 cc_library(
+    name = "fire_reset",
+    srcs = [
+        "fire_reset.cc",
+    ],
+    hdrs = [
+        "fire_reset.h",
+    ],
+    strip_include_prefix = "/src",
+    deps = [
+        ":environment",
+    ],
+)
+
+cc_library(
     name = "max_and_skip",
     srcs = [
         "max_and_skip.cc",

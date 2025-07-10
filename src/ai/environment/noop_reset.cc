@@ -7,15 +7,18 @@ NoopResetEnvironment::NoopResetEnvironment(
     : env_(std::move(env)), max_noops_(max_noops), random_generator_(seed),
       distribution_(1, max_noops + 1) {}
 
-void NoopResetEnvironment::reset() {
-  env_->reset();
+ScreenBuffer NoopResetEnvironment::reset() {
+  ScreenBuffer observation = env_->reset();
   size_t noops = distribution_(random_generator_);
   for (size_t i = 0; i < noops; ++i) {
     auto result = env_->step(ale::Action::PLAYER_A_NOOP);
     if (result.terminated || result.truncated) {
-      env_->reset();
+      observation = env_->reset();
+    } else {
+      observation = result.observation;
     }
   }
+  return observation;
 }
 
 Step NoopResetEnvironment::step(const ale::Action &action) {

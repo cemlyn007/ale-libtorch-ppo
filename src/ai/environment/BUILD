@@ -46,6 +46,20 @@ cc_library(
 )
 
 cc_library(
+    name = "max_and_skip",
+    srcs = [
+        "max_and_skip.cc",
+    ],
+    hdrs = [
+        "max_and_skip.h",
+    ],
+    strip_include_prefix = "/src",
+    deps = [
+        ":environment",
+    ],
+)
+
+cc_library(
     name = "noop_reset",
     srcs = [
         "noop_reset.cc",

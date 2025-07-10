@@ -7,7 +7,7 @@ namespace ai::environment {
 class EpisodeLife : public VirtualEnvironment {
 public:
   explicit EpisodeLife(std::unique_ptr<VirtualEnvironment> env);
-  void reset() override;
+  ScreenBuffer reset() override;
   Step step(const ale::Action &action) override;
   ale::ALEInterface &get_interface() override;
 

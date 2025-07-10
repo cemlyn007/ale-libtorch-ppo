@@ -3,8 +3,7 @@
 namespace ai::environment {
 
 Environment::Environment(const std::filesystem::path &rom_path,
-                         size_t max_num_frames_per_episode, size_t frame_skip,
-                         float repeat_action_probability, int seed)
+                         size_t max_num_frames_per_episode, int seed)
     : ale_() {
   if (rom_path.empty()) {
     throw std::invalid_argument("ROM path must not be empty.");
@@ -15,20 +14,26 @@ Environment::Environment(const std::filesystem::path &rom_path,
   }
   ale_.setInt("max_num_frames_per_episode",
               static_cast<int>(max_num_frames_per_episode));
-  ale_.setInt("frame_skip", static_cast<int>(frame_skip));
-  ale_.setFloat("repeat_action_probability", repeat_action_probability);
+  ale_.setInt("frame_skip", 1);
+  ale_.setFloat("repeat_action_probability", 0.0f);
   ale_.setInt("random_seed", seed);
   ale_.setInt("max_num_frames_per_episode", 0);
   ale_.loadROM(rom_path.string());
 }
 
-void Environment::reset() { ale_.reset_game(); }
+ScreenBuffer Environment::reset() {
+  ale_.reset_game();
+  ScreenBuffer observation;
+  ale_.getScreenGrayscale(observation);
+  return observation;
+}
 
 Step Environment::step(const ale::Action &action) {
   Step result;
   result.reward = ale_.act(action);
   result.terminated = ale_.game_over(false);
   result.truncated = ale_.game_truncated();
+  ale_.getScreenGrayscale(result.observation);
   return result;
 }
 

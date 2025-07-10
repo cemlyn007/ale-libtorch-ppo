@@ -9,7 +9,7 @@ class NoopResetEnvironment : public VirtualEnvironment {
 public:
   explicit NoopResetEnvironment(std::unique_ptr<VirtualEnvironment> env,
                                 size_t max_noops, size_t seed);
-  void reset() override;
+  ScreenBuffer reset() override;
   Step step(const ale::Action &action) override;
   ale::ALEInterface &get_interface() override;
 

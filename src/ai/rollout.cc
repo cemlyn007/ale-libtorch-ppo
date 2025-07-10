@@ -1,6 +1,7 @@
 #include "rollout.h"
 #include "ai/environment/episode_life.h"
 #include "ai/environment/episode_recorder.h"
+#include "ai/environment/max_and_skip.h"
 #include "ai/environment/noop_reset.h"
 #include "ai/gae.h"
 #include <cassert>
@@ -51,8 +52,8 @@ Rollout::Rollout(
 
   for (size_t i = 0; i < total_environments_; i++) {
     std::unique_ptr<ai::environment::VirtualEnvironment> environment =
-        std::make_unique<ai::environment::Environment>(
-            rom_path_, max_steps_, frame_skip, 0.0f, i + seed);
+        std::make_unique<ai::environment::Environment>(rom_path_, max_steps_,
+                                                       i + seed);
 
     if (i == 0 && video_path.has_value()) {
       environment = std::make_unique<ai::environment::EpisodeRecorder>(
@@ -60,7 +61,9 @@ Rollout::Rollout(
     }
     // TODO: Make this configurable.
     environment = std::make_unique<ai::environment::NoopResetEnvironment>(
-        std::move(environment), 30, seed + 1);
+        std::move(environment), 30, seed + i);
+    environment = std::make_unique<ai::environment::MaxAndSkipEnvironment>(
+        std::move(environment), frame_skip);
     environment =
         std::make_unique<ai::environment::EpisodeLife>(std::move(environment));
     environments_.emplace_back(std::move(environment));
@@ -218,19 +221,21 @@ void Rollout::worker() {
 StepResult Rollout::step(const StepInput &input) {
   StepResult output;
   output.environment_index = input.environment_index;
+  std::vector<unsigned char> observation;
   if (input.is_episode_start) {
-    environments_[input.environment_index]->reset();
+    observation = environments_[input.environment_index]->reset();
     output.reward = 0.0f;
     output.terminated = false;
     output.truncated = false;
   } else {
     auto result = environments_[input.environment_index]->step(input.action);
+    observation = result.observation;
     output.reward = result.reward;
     output.terminated = result.terminated;
     output.truncated = result.truncated;
   }
-  environments_[input.environment_index]->get_interface().getScreenGrayscale(
-      screen_buffers_[input.environment_index]);
+  std::copy(observation.begin(), observation.end(),
+            screen_buffers_[input.environment_index].begin());
   return output;
 }
 } // namespace ai::rollout

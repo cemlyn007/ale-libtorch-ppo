@@ -4,7 +4,10 @@
 
 namespace ai::environment {
 
+typedef std::vector<unsigned char> ScreenBuffer;
+
 struct Step {
+  ScreenBuffer observation;
   int reward;
   bool terminated;
   bool truncated;
@@ -12,7 +15,7 @@ struct Step {
 
 class VirtualEnvironment {
 public:
-  virtual void reset() = 0;
+  virtual ScreenBuffer reset() = 0;
   virtual Step step(const ale::Action &action) = 0;
   virtual ale::ALEInterface &get_interface() = 0;
 };
@@ -20,9 +23,8 @@ public:
 class Environment : public VirtualEnvironment {
 public:
   Environment(const std::filesystem::path &rom_path,
-              size_t max_num_frames_per_episode, size_t frame_skip,
-              float repeat_action_probability, int seed);
-  void reset() override;
+              size_t max_num_frames_per_episode, int seed);
+  ScreenBuffer reset() override;
   Step step(const ale::Action &action) override;
   ale::ALEInterface &get_interface() override;
 

@@ -8,7 +8,7 @@ Metrics compute(const torch::Tensor &log_probabilities,
                 const torch::Tensor &masks, float clip_param,
                 float value_loss_coef, float entropy_coef) {
   auto action_indices = actions.unsqueeze(-1);
-  auto clipped = clipped_surogate_objectives(
+  auto clipped = clipped_surrogate_objectives(
       log_probabilities.gather(-1, action_indices).squeeze(-1),
       old_log_probabilities.gather(-1, action_indices).squeeze(-1), advantages,
       clip_param);
@@ -25,10 +25,11 @@ Metrics compute(const torch::Tensor &log_probabilities,
           masks.detach()};
 }
 
-ClippedSurogateObjectivesResult
-clipped_surogate_objectives(const torch::Tensor &log_probabilities,
-                            const torch::Tensor &old_log_probabilities,
-                            const torch::Tensor &advantages, float clip_param) {
+ClippedSurrogateObjectivesResult
+clipped_surrogate_objectives(const torch::Tensor &log_probabilities,
+                             const torch::Tensor &old_log_probabilities,
+                             const torch::Tensor &advantages,
+                             float clip_param) {
   auto ratios = torch::exp(log_probabilities - old_log_probabilities);
   auto clipped_ratios =
       torch::clamp(ratios, 1.0 - clip_param, 1.0 + clip_param);

@@ -13,7 +13,7 @@ struct Metrics {
   torch::Tensor masks;
 };
 
-struct ClippedSurogateObjectivesResult {
+struct ClippedSurrogateObjectivesResult {
   torch::Tensor values;
   torch::Tensor ratios;
 };
@@ -25,10 +25,10 @@ Metrics compute(const torch::Tensor &log_probabilities,
                 const torch::Tensor &masks, float clip_param,
                 float value_loss_coef, float entropy_coef);
 
-ClippedSurogateObjectivesResult
-clipped_surogate_objectives(const torch::Tensor &log_probabilities,
-                            const torch::Tensor &log_old_probabilities,
-                            const torch::Tensor &advantages, float clip_param);
+ClippedSurrogateObjectivesResult
+clipped_surrogate_objectives(const torch::Tensor &log_probabilities,
+                             const torch::Tensor &log_old_probabilities,
+                             const torch::Tensor &advantages, float clip_param);
 
 // Requires log probabilities.
 torch::Tensor compute_entropies(const torch::Tensor &);

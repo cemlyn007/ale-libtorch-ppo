@@ -61,11 +61,11 @@ Rollout::Rollout(
   for (size_t i = 0; i < total_environments_; i++) {
     std::unique_ptr<ai::environment::VirtualEnvironment> environment =
         std::make_unique<ai::environment::Environment>(rom_path_, max_steps_,
-                                                       i + seed);
+                                                       GRAYSCALE, i + seed);
 
     if (i == 0 && video_path.has_value()) {
       environment = std::make_unique<ai::environment::EpisodeRecorder>(
-          std::move(environment), video_path.value(), true);
+          std::move(environment), video_path.value(), GRAYSCALE);
     }
     // TODO: Make this configurable.
     environment = std::make_unique<ai::environment::NoopResetEnvironment>(

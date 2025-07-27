@@ -3,15 +3,19 @@
 namespace ai::environment {
 
 Environment::Environment(const std::filesystem::path &rom_path,
-                         size_t max_num_frames_per_episode, int seed)
-    : ale_() {
-  if (rom_path.empty()) {
+                         size_t max_num_frames_per_episode, bool grayscale,
+                         int seed)
+    : ale_(), grayscale_(grayscale), size_([&] {
+        ale_.loadROM(rom_path.string());
+        auto screen = ale_.getScreen();
+        auto channels = grayscale_ ? 1 : 3;
+        return channels * screen.height() * screen.width();
+      }()) {
+  if (rom_path.empty())
     throw std::invalid_argument("ROM path must not be empty.");
-  }
-  if (!std::filesystem::exists(rom_path)) {
+  if (!std::filesystem::exists(rom_path))
     throw std::invalid_argument("ROM file does not exist: " +
                                 rom_path.string());
-  }
   ale_.setInt("max_num_frames_per_episode",
               static_cast<int>(max_num_frames_per_episode));
   ale_.setInt("frame_skip", 1);
@@ -23,9 +27,7 @@ Environment::Environment(const std::filesystem::path &rom_path,
 
 ScreenBuffer Environment::reset() {
   ale_.reset_game();
-  ScreenBuffer observation;
-  ale_.getScreenGrayscale(observation);
-  return observation;
+  return get_observation();
 }
 
 Step Environment::step(const ale::Action &action) {
@@ -33,10 +35,20 @@ Step Environment::step(const ale::Action &action) {
   result.reward = ale_.act(action);
   result.terminated = ale_.game_over(false);
   result.truncated = ale_.game_truncated();
-  ale_.getScreenGrayscale(result.observation);
+  result.observation = get_observation();
   return result;
 }
 
 ale::ALEInterface &Environment::get_interface() { return ale_; }
+
+ScreenBuffer Environment::get_observation() {
+  ScreenBuffer observation;
+  observation.resize(size_);
+  if (grayscale_)
+    ale_.getScreenGrayscale(observation);
+  else
+    ale_.getScreenRGB(observation);
+  return observation;
+}
 
 } // namespace ai::environment

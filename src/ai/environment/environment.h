@@ -23,13 +23,16 @@ public:
 class Environment : public VirtualEnvironment {
 public:
   Environment(const std::filesystem::path &rom_path,
-              size_t max_num_frames_per_episode, int seed);
+              size_t max_num_frames_per_episode, bool grayscale, int seed);
   ScreenBuffer reset() override;
   Step step(const ale::Action &action) override;
   ale::ALEInterface &get_interface() override;
 
 private:
   ale::ALEInterface ale_;
+  const bool grayscale_;
+  const size_t size_;
+  ScreenBuffer get_observation();
 };
 
 } // namespace ai::environment

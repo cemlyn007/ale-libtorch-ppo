@@ -9,6 +9,8 @@
 
 namespace ai::rollout {
 
+const bool GRAYSCALE = true;
+
 Rollout::Rollout(
     std::filesystem::path rom_path, size_t total_environments, size_t horizon,
     size_t max_steps, size_t frame_stack,
@@ -21,10 +23,14 @@ Rollout::Rollout(
         ale::ALEInterface ale;
         ale.loadROM(rom_path);
         auto screen = ale.getScreen();
-        return ai::buffer::Buffer(
-            total_environments, horizon,
-            {frame_stack, screen.height(), screen.width()},
-            ale.getMinimalActionSet().size(), device);
+        std::vector<size_t> observation_shape;
+        if (GRAYSCALE)
+          observation_shape = {frame_stack, screen.height(), screen.width()};
+        else
+          observation_shape = {frame_stack, 3, screen.height(), screen.width()};
+        return ai::buffer::Buffer(total_environments, horizon,
+                                  observation_shape,
+                                  ale.getMinimalActionSet().size(), device);
       }()),
       total_environments_(total_environments), horizon_(horizon),
       frame_stack_(frame_stack), max_steps_(max_steps), is_terminated_(),
@@ -51,6 +57,7 @@ Rollout::Rollout(
                                 rom_path_.string());
   }
 
+  std::vector<int64_t> observation_shape;
   for (size_t i = 0; i < total_environments_; i++) {
     std::unique_ptr<ai::environment::VirtualEnvironment> environment =
         std::make_unique<ai::environment::Environment>(rom_path_, max_steps_,
@@ -75,20 +82,25 @@ Rollout::Rollout(
         std::vector<unsigned char>(screen.height() * screen.width()));
     environments_.back()->get_interface().getScreenGrayscale(
         screen_buffers_.back());
-    screen_tensor_blobs_.push_back(
-        torch::from_blob(screen_buffers_.back().data(),
-                         {static_cast<int64_t>(screen.height()),
-                          static_cast<int64_t>(screen.width())},
-                         torch::kByte));
+    if (GRAYSCALE) {
+      observation_shape = {static_cast<int64_t>(screen.height()),
+                           static_cast<int64_t>(screen.width())};
+    } else {
+      observation_shape = {3, static_cast<int64_t>(screen.height()),
+                           static_cast<int64_t>(screen.width())};
+    }
+    screen_tensor_blobs_.push_back(torch::from_blob(
+        screen_buffers_.back().data(), observation_shape, torch::kByte));
   }
 
   auto total = static_cast<int64_t>(total_environments_);
   auto frame = static_cast<int64_t>(frame_stack_);
   auto options = torch::TensorOptions(torch::kFloat32).device(device_);
-  observations_ =
-      torch::zeros({total, frame, screen_tensor_blobs_.back().size(0),
-                    screen_tensor_blobs_.back().size(1)},
-                   options.dtype(torch::kByte));
+  std::vector<int64_t> observations_shape({total, frame});
+  observations_shape.insert(observations_shape.end(), observation_shape.begin(),
+                            observation_shape.end());
+
+  observations_ = torch::zeros(observations_shape, options.dtype(torch::kByte));
   is_terminated_ = torch::zeros({total}, options.dtype(torch::kBool));
   is_truncated_ = torch::zeros({total}, options.dtype(torch::kBool));
   is_episode_start_ = torch::ones({total}, options.dtype(torch::kBool));
@@ -170,8 +182,8 @@ RolloutResult Rollout::rollout() {
       }
     }
 
-    // Add the observations, and the actions that from those observations led to
-    // the rewards and terminal state changes.
+    // Add the observations, and the actions that from those observations led
+    // to the rewards and terminal state changes.
     buffer_.add(observations_, action_result.actions, rewards_, is_terminated_,
                 is_truncated_, is_episode_start_, action_result.logits,
                 action_result.values);

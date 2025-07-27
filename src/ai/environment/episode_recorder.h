@@ -8,7 +8,8 @@ namespace ai::environment {
 class EpisodeRecorder : public VirtualEnvironment {
 public:
   explicit EpisodeRecorder(std::unique_ptr<VirtualEnvironment> env,
-                           const std::filesystem::path &video_path);
+                           const std::filesystem::path &video_path,
+                           bool grayscale);
   ScreenBuffer reset() override;
   Step step(const ale::Action &action) override;
   ale::ALEInterface &get_interface() override;

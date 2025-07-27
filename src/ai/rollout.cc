@@ -58,7 +58,7 @@ Rollout::Rollout(
 
     if (i == 0 && video_path.has_value()) {
       environment = std::make_unique<ai::environment::EpisodeRecorder>(
-          std::move(environment), video_path.value());
+          std::move(environment), video_path.value(), true);
     }
     // TODO: Make this configurable.
     environment = std::make_unique<ai::environment::NoopResetEnvironment>(

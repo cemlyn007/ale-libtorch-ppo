@@ -192,13 +192,13 @@ struct NetworkImpl : torch::nn::Module {
   NetworkImpl(size_t hidden_size, size_t action_size)
       : sequential(layer_init(torch::nn::Conv2d(
                        torch::nn::Conv2dOptions(4, 32, 8).stride(4))),
-            torch::nn::ReLU(),
+                   torch::nn::ReLU(),
                    layer_init(torch::nn::Conv2d(
                        torch::nn::Conv2dOptions(32, 64, 4).stride(2))),
-            torch::nn::ReLU(),
+                   torch::nn::ReLU(),
                    layer_init(torch::nn::Conv2d(
                        torch::nn::Conv2dOptions(64, 64, 3).stride(1))),
-            torch::nn::ReLU(), torch::nn::Flatten(),
+                   torch::nn::ReLU(), torch::nn::Flatten(),
                    layer_init(torch::nn::Linear(64 * 7 * 7, hidden_size))),
         action_head(
             layer_init(torch::nn::Linear(hidden_size, action_size), 0.01)),
@@ -290,8 +290,9 @@ int main(int argc, char **argv) {
   TensorBoardLogger logger(logger_path);
   Network network(config.hidden_size, config.action_size);
   network->to(device);
-  torch::optim::Adam optimizer(network->parameters(),
-                               torch::optim::AdamOptions(config.learning_rate));
+  torch::optim::Adam optimizer(
+      network->parameters(),
+      torch::optim::AdamOptions(config.learning_rate).eps(1e-5));
 
   ai::rollout::Rollout rollout(
       rom_path, config.total_environments, config.horizon, config.max_steps,

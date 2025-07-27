@@ -170,18 +170,39 @@ void log_data(TensorBoardLogger &logger, const ai::rollout::Log &log,
                        gather(metrics.returns, metrics.masks));
 }
 
+torch::nn::Conv2d layer_init(torch::nn::Conv2d layer,
+                             double std = std::sqrt(2.0), double bias = 0.0) {
+  torch::nn::init::orthogonal_(layer->weight, std);
+  if (layer->bias.defined()) {
+    torch::nn::init::constant_(layer->bias, bias);
+  }
+  return layer;
+}
+
+torch::nn::Linear layer_init(torch::nn::Linear layer,
+                             double std = std::sqrt(2.0), double bias = 0.0) {
+  torch::nn::init::orthogonal_(layer->weight, std);
+  if (layer->bias.defined()) {
+    torch::nn::init::constant_(layer->bias, bias);
+  }
+  return layer;
+}
+
 struct NetworkImpl : torch::nn::Module {
   NetworkImpl(size_t hidden_size, size_t action_size)
-      : sequential(
-            torch::nn::Conv2d(torch::nn::Conv2dOptions(4, 32, 8).stride(4)),
+      : sequential(layer_init(torch::nn::Conv2d(
+                       torch::nn::Conv2dOptions(4, 32, 8).stride(4))),
             torch::nn::ReLU(),
-            torch::nn::Conv2d(torch::nn::Conv2dOptions(32, 64, 4).stride(2)),
+                   layer_init(torch::nn::Conv2d(
+                       torch::nn::Conv2dOptions(32, 64, 4).stride(2))),
             torch::nn::ReLU(),
-            torch::nn::Conv2d(torch::nn::Conv2dOptions(64, 64, 3).stride(1)),
+                   layer_init(torch::nn::Conv2d(
+                       torch::nn::Conv2dOptions(64, 64, 3).stride(1))),
             torch::nn::ReLU(), torch::nn::Flatten(),
-            torch::nn::Linear(64 * 7 * 7, hidden_size), torch::nn::ReLU()),
-        action_head(torch::nn::Linear(hidden_size, action_size)),
-        value_head(torch::nn::Linear(hidden_size, 1)) {
+                   layer_init(torch::nn::Linear(64 * 7 * 7, hidden_size))),
+        action_head(
+            layer_init(torch::nn::Linear(hidden_size, action_size), 0.01)),
+        value_head(layer_init(torch::nn::Linear(hidden_size, 1), 1)) {
     register_module("sequential", sequential);
     register_module("action_head", action_head);
     register_module("value_head", value_head);
@@ -211,22 +232,6 @@ struct NetworkImpl : torch::nn::Module {
   torch::nn::Linear action_head, value_head;
 };
 TORCH_MODULE(Network);
-
-void initialize_weights(torch::nn::Module &module) {
-  for (auto &submodule : module.children()) {
-    if (auto linear = dynamic_cast<torch::nn::LinearImpl *>(submodule.get())) {
-
-      linear->weight.data().normal_(
-          0.0, 1.0 / std::sqrt(linear->options.in_features()));
-      if (linear->bias.defined()) {
-        linear->bias.data().fill_(1.0 /
-                                  std::sqrt(linear->options.in_features()));
-      }
-    } else {
-      initialize_weights(*submodule);
-    }
-  }
-}
 
 ai::ppo::train::Batch prepare_batch(ai::buffer::Batch &batch) {
 
@@ -284,7 +289,6 @@ int main(int argc, char **argv) {
 
   TensorBoardLogger logger(logger_path);
   Network network(config.hidden_size, config.action_size);
-  initialize_weights(*network);
   network->to(device);
   torch::optim::Adam optimizer(network->parameters(),
                                torch::optim::AdamOptions(config.learning_rate));

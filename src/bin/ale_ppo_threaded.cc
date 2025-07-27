@@ -234,10 +234,7 @@ struct NetworkImpl : torch::nn::Module {
 TORCH_MODULE(Network);
 
 ai::ppo::train::Batch prepare_batch(ai::buffer::Batch &batch) {
-
-  auto observations = batch.observations.view({-1, batch.observations.size(2),
-                                               batch.observations.size(3),
-                                               batch.observations.size(4)});
+  auto observations = batch.observations.flatten(0, 1);
   auto actions = batch.actions.ravel();
   auto advantages = batch.advantages.ravel();
   auto logits = batch.logits.view({-1, batch.logits.size(2)});

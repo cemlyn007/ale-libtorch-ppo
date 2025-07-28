@@ -21,7 +21,6 @@ Environment::Environment(const std::filesystem::path &rom_path,
   ale_.setInt("frame_skip", 1);
   ale_.setFloat("repeat_action_probability", 0.0f);
   ale_.setInt("random_seed", seed);
-  ale_.setInt("max_num_frames_per_episode", 0);
   ale_.loadROM(rom_path.string());
 }
 

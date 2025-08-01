@@ -9,11 +9,9 @@
 
 namespace ai::rollout {
 
-const bool GRAYSCALE = true;
-
 Rollout::Rollout(
     std::filesystem::path rom_path, size_t total_environments, size_t horizon,
-    size_t max_steps, size_t frame_stack,
+    size_t max_steps, size_t frame_stack, bool grayscale,
     std::function<ActionResult(const torch::Tensor &)> action_selector,
     float gae_discount, float gae_lambda, const torch::Device &device,
     size_t seed, size_t num_workers, size_t worker_batch_size,
@@ -24,7 +22,7 @@ Rollout::Rollout(
         ale.loadROM(rom_path);
         auto screen = ale.getScreen();
         std::vector<size_t> observation_shape;
-        if (GRAYSCALE)
+        if (grayscale)
           observation_shape = {frame_stack, screen.height(), screen.width()};
         else
           observation_shape = {frame_stack, 3, screen.height(), screen.width()};
@@ -35,8 +33,8 @@ Rollout::Rollout(
       total_environments_(total_environments), horizon_(horizon),
       frame_stack_(frame_stack), max_steps_(max_steps), is_terminated_(),
       is_truncated_(), is_episode_start_(), action_selector_(action_selector),
-      device_(device), environments_(), stop_(),
-      batch_size_(worker_batch_size) {
+      device_(device), environments_(), stop_(), batch_size_(worker_batch_size),
+      grayscale_(grayscale) {
   if (total_environments_ == 0) {
     throw std::invalid_argument("Total environments must be greater than 0.");
   }
@@ -61,11 +59,11 @@ Rollout::Rollout(
   for (size_t i = 0; i < total_environments_; i++) {
     std::unique_ptr<ai::environment::VirtualEnvironment> environment =
         std::make_unique<ai::environment::Environment>(rom_path_, max_steps_,
-                                                       GRAYSCALE, i + seed);
+                                                       grayscale_, i + seed);
 
     if (i == 0 && video_path.has_value()) {
       environment = std::make_unique<ai::environment::EpisodeRecorder>(
-          std::move(environment), video_path.value(), GRAYSCALE);
+          std::move(environment), video_path.value(), grayscale_);
     }
     // TODO: Make this configurable.
     environment = std::make_unique<ai::environment::NoopResetEnvironment>(
@@ -78,14 +76,18 @@ Rollout::Rollout(
         std::make_unique<ai::environment::FireReset>(std::move(environment));
     environments_.emplace_back(std::move(environment));
     auto screen = environments_.back()->get_interface().getScreen();
-    screen_buffers_.emplace_back(
-        std::vector<unsigned char>(screen.height() * screen.width()));
-    environments_.back()->get_interface().getScreenGrayscale(
-        screen_buffers_.back());
-    if (GRAYSCALE) {
+    if (grayscale_) {
+      screen_buffers_.emplace_back(
+          std::vector<unsigned char>(screen.height() * screen.width()));
+      environments_.back()->get_interface().getScreenGrayscale(
+          screen_buffers_.back());
       observation_shape = {static_cast<int64_t>(screen.height()),
                            static_cast<int64_t>(screen.width())};
     } else {
+      screen_buffers_.emplace_back(
+          std::vector<unsigned char>(3 * screen.height() * screen.width()));
+      environments_.back()->get_interface().getScreenRGB(
+          screen_buffers_.back());
       observation_shape = {3, static_cast<int64_t>(screen.height()),
                            static_cast<int64_t>(screen.width())};
     }

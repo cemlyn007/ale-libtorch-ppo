@@ -42,7 +42,7 @@ struct StepResult {
 class Rollout {
 public:
   Rollout(std::filesystem::path rom_path, size_t total_environments,
-          size_t horizon, size_t max_steps, size_t frame_stack,
+          size_t horizon, size_t max_steps, size_t frame_stack, bool grayscale,
           std::function<ActionResult(const torch::Tensor &)> action_selector,
           float gae_discount, float gae_lambda, const torch::Device &device,
           size_t seed, size_t num_workers, size_t worker_batch_size,
@@ -91,6 +91,7 @@ private:
   ai::queue::Queue<StepInput> action_queue_;
   ai::queue::Queue<StepResult> step_queue_;
   size_t batch_size_;
+  bool grayscale_;
 };
 
 } // namespace ai::rollout

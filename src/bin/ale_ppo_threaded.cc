@@ -11,6 +11,10 @@
 #include <torch/torch.h>
 #include <yaml-cpp/yaml.h>
 
+const bool USE_CUDA_GRAPH = false;
+const bool PREPROCESSED_GRAYSCALE = true;
+const bool ANNEAL_ENTROPY_COEFFICIENT = false;
+
 // This is being used for annealing the entropy coefficient
 //  based on the average return.
 static double sum = 0;
@@ -22,6 +26,9 @@ double get_annealed_entropy_coef(double entropy_coef) {
   // This is a simple annealing function that decreases the entropy
   // coefficient as the average return increases.
   // 400 is the maximum episodic return for playing breakout.
+  if (!ANNEAL_ENTROPY_COEFFICIENT) {
+    return entropy_coef;
+  }
   return entropy_coef * (400.0 - get_average_return()) / 400.0;
 }
 
@@ -152,6 +159,7 @@ void log_data(TensorBoardLogger &logger, const ai::rollout::Log &log,
                     mean(metrics.entropies, metrics.masks));
   logger.add_scalar("mean_ratio", log.steps,
                     mean(metrics.ratio, metrics.masks));
+  if (metrics.clipped_gradients.numel() > 1)
   logger.add_histogram("clipped_gradients", log.steps,
                        to_vector(metrics.clipped_gradients));
   logger.add_histogram("losses", log.steps,
@@ -216,11 +224,17 @@ struct NetworkImpl : torch::nn::Module {
   OutputType forward(torch::Tensor x) {
     {
       torch::NoGradGuard no_grad;
-      if (x.device().is_cuda()) {
+      if (x.device().is_cuda())
         x = x.to(torch::kFloat32);
+      if (PREPROCESSED_GRAYSCALE) {
+        x = ai::vision::resize_frame_stacked_grayscale_images(x);
+      } else {
+        // TODO: Investigate why the performance is worse compared to
+        //  preprocessed grayscale.
+        x = ai::vision::rgb_to_grayscale_frame_stacked_images(x);
+        x = ai::vision::resize_frame_stacked_grayscale_images(x);
       }
-      x = ai::vision::resize_frame_stacked_grayscale_images(x);
-      x = x.to(torch::kFloat32) / 255.0;
+      x.divide_(255.0);
     }
     x = sequential->forward(x);
     auto logits = action_head->forward(x);
@@ -293,7 +307,7 @@ int main(int argc, char **argv) {
 
   ai::rollout::Rollout rollout(
       rom_path, config.total_environments, config.horizon, config.max_steps,
-      config.frame_stack,
+      config.frame_stack, PREPROCESSED_GRAYSCALE,
       [&network, &device, action_size = config.action_size](
           const torch::Tensor &obs) -> ai::rollout::ActionResult {
         network->eval();
@@ -328,7 +342,7 @@ int main(int argc, char **argv) {
 
   at::cuda::CUDAGraph graph;
   network->train();
-  {
+  if (USE_CUDA_GRAPH) {
     auto hp = prepare_hyperparameters(config);
     ai::ppo::train::capture_train_cuda_graph(graph, network, optimizer, metrics,
                                              indices, batch, config.num_epochs,
@@ -359,7 +373,13 @@ int main(int argc, char **argv) {
       auto b = prepare_batch(result.batch);
       batch.copy_(b);
     }
-    ai::ppo::train::train_cuda_graph(graph);
+    if (USE_CUDA_GRAPH) {
+      ai::ppo::train::train_cuda_graph(graph);
+    } else {
+      auto hp = prepare_hyperparameters(config);
+      ai::ppo::train::train(network, optimizer, metrics, indices, batch,
+                            config.num_epochs, config.num_mini_batches, hp);
+    }
 
     log_data(logger, result.log, metrics);
     sum += std::accumulate(result.log.episode_returns.begin(),

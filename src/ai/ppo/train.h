@@ -89,8 +89,9 @@ struct Metrics {
 
   void set(size_t epoch_index, size_t mini_batch_index,
            const MiniBatchUpdateResult &result, const Batch &mini_batch) {
-    const torch::indexing::TensorIndex indices(
-        {{epoch_index, mini_batch_index}});
+    const std::array<torch::indexing::TensorIndex, 2> indices = {
+        static_cast<int64_t>(epoch_index),
+        static_cast<int64_t>(mini_batch_index)};
     loss.index_put_(indices, result.ppo.loss.reshape({1}));
     clipped_losses.index_put_(indices, result.ppo.clipped_losses);
     value_losses.index_put_(indices, result.ppo.value_losses);

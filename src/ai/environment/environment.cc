@@ -30,12 +30,13 @@ ScreenBuffer Environment::reset() {
 }
 
 Step Environment::step(const ale::Action &action) {
-  Step result;
-  result.reward = ale_.act(action);
-  result.terminated = ale_.game_over(false);
-  result.truncated = ale_.game_truncated();
-  result.observation = get_observation();
-  return result;
+  ale::reward_t reward = ale_.act(action);
+  bool game_over = ale_.game_over(false);
+  return {.observation = get_observation(),
+          .reward = reward,
+          .terminated = game_over,
+          .truncated = ale_.game_truncated(),
+          .game_over = game_over};
 }
 
 ale::ALEInterface &Environment::get_interface() { return ale_; }

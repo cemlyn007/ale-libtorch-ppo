@@ -13,6 +13,8 @@ struct Log {
   size_t episodes;
   std::vector<float> episode_returns;
   std::vector<size_t> episode_lengths;
+  std::vector<float> game_returns;
+  std::vector<size_t> game_lengths;
 };
 
 struct RolloutResult {
@@ -37,6 +39,7 @@ struct StepResult {
   float reward;
   bool terminated;
   bool truncated;
+  bool game_over;
 };
 
 class Rollout {
@@ -76,8 +79,11 @@ private:
   torch::Tensor is_terminated_;
   torch::Tensor is_truncated_;
   torch::Tensor is_episode_start_;
+  std::vector<bool> game_overs_;
   std::vector<float> episode_returns_;
   std::vector<size_t> episode_lengths_;
+  std::vector<float> game_returns_;
+  std::vector<size_t> game_lengths_;
   torch::Tensor rewards_;
   std::function<ActionResult(const torch::Tensor &)> action_selector_;
   torch::Device device_;

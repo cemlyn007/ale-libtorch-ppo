@@ -115,6 +115,12 @@ Config load_config(const std::filesystem::path &path) {
   return config;
 }
 
+template <typename T> float mean(const std::vector<T> &values) {
+  if (values.empty())
+    throw std::invalid_argument("Values vector is empty.");
+  return std::accumulate(values.begin(), values.end(), 0.0f) / values.size();
+}
+
 float mean(const torch::Tensor &tensor, const torch::Tensor &mask) {
   auto masked_tensor = tensor.masked_select(mask);
   return masked_tensor.mean().item<float>();
@@ -137,16 +143,19 @@ std::vector<float> to_vector(const torch::Tensor &tensor) {
 void log_data(TensorBoardLogger &logger, const ai::rollout::Log &log,
               const ai::ppo::train::Metrics &metrics) {
   if (!log.episode_returns.empty()) {
-    float mean_return = std::accumulate(log.episode_returns.begin(),
-                                        log.episode_returns.end(), 0.0f) /
-                        log.episode_returns.size();
-    float mean_length = std::accumulate(log.episode_lengths.begin(),
-                                        log.episode_lengths.end(), 0.0f) /
-                        log.episode_lengths.size();
-    logger.add_scalar("mean_episode_return", log.steps, mean_return);
-    logger.add_scalar("mean_episode_length", log.steps, mean_length);
+    logger.add_scalar("mean_episode_return", log.steps,
+                      mean(log.episode_returns));
+    logger.add_scalar("mean_episode_length", log.steps,
+                      mean(log.episode_lengths));
     logger.add_histogram("episode_returns", log.steps, log.episode_returns);
     logger.add_histogram("episode_lengths", log.steps, log.episode_lengths);
+
+    if (!log.game_returns.empty()) {
+      logger.add_scalar("mean_game_return", log.steps, mean(log.game_returns));
+      logger.add_scalar("mean_game_length", log.steps, mean(log.game_lengths));
+      logger.add_histogram("game_returns", log.steps, log.game_returns);
+      logger.add_histogram("game_lengths", log.steps, log.game_lengths);
+    }
   }
   logger.add_scalar("mean_clipped_gradient", log.steps,
                     metrics.clipped_gradients.mean().item<float>());

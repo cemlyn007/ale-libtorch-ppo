@@ -32,7 +32,12 @@ Rollout::Rollout(
       }()),
       total_environments_(total_environments), horizon_(horizon),
       frame_stack_(frame_stack), max_steps_(max_steps), is_terminated_(),
-      is_truncated_(), is_episode_start_(), action_selector_(action_selector),
+      is_truncated_(), is_episode_start_(),
+      game_overs_(total_environments, false),
+      episode_returns_(total_environments, 0.0f),
+      episode_lengths_(total_environments, 0),
+      game_returns_(total_environments, 0.0f),
+      game_lengths_(total_environments, 0), action_selector_(action_selector),
       device_(device), environments_(), stop_(), batch_size_(worker_batch_size),
       grayscale_(grayscale) {
   if (total_environments_ == 0) {
@@ -108,11 +113,6 @@ Rollout::Rollout(
   is_episode_start_ = torch::ones({total}, options.dtype(torch::kBool));
   rewards_ = torch::zeros({total}, options);
 
-  episode_returns_.resize(total_environments_, 0.0f);
-  std::fill(episode_returns_.begin(), episode_returns_.end(), 0.0);
-  episode_lengths_.resize(total_environments_, 0);
-  std::fill(episode_lengths_.begin(), episode_lengths_.end(), 0);
-
   std::cout << "Creating " << num_workers << " worker threads." << std::endl;
   for (size_t i = 0; i < num_workers; ++i) {
     workers_.emplace_back(&Rollout::worker, this);
@@ -148,6 +148,8 @@ void Rollout::update_observations() {
 RolloutResult Rollout::rollout() {
   std::vector<float> episode_returns;
   std::vector<size_t> episode_lengths;
+  std::vector<float> game_returns;
+  std::vector<size_t> game_lengths;
 
   ActionResult action_result;
   std::vector<StepInput> step_inputs(total_environments_);
@@ -178,8 +180,11 @@ RolloutResult Rollout::rollout() {
         rewards_[ale_index] = result.reward;
         is_terminated_[ale_index] = result.terminated;
         is_truncated_[ale_index] = result.truncated;
+        game_overs_[ale_index] = result.game_over;
         episode_returns_[ale_index] += result.reward;
         episode_lengths_[ale_index]++;
+        game_returns_[ale_index] += result.reward;
+        game_lengths_[ale_index]++;
         total_steps_increment++;
       }
     }
@@ -205,6 +210,12 @@ RolloutResult Rollout::rollout() {
         episode_lengths.push_back(episode_lengths_[ale_index]);
         episode_returns_[ale_index] = 0.0;
         episode_lengths_[ale_index] = 0;
+        if (game_overs_[ale_index]) {
+          game_returns.push_back(game_returns_[ale_index]);
+          game_lengths.push_back(game_lengths_[ale_index]);
+          game_returns_[ale_index] = 0.0;
+          game_lengths_[ale_index] = 0;
+        }
       } else if (step_inputs[ale_index].is_episode_start) {
         is_episode_start_[ale_index] = false;
       }
@@ -214,8 +225,12 @@ RolloutResult Rollout::rollout() {
   action_result = action_selector_(observations_);
   const auto batch =
       buffer_.get(action_result.values, gae_discount_, gae_lambda_);
-  const Log log{total_steps_, current_episode_, episode_returns,
-                episode_lengths};
+  const Log log{.steps = total_steps_,
+                .episodes = current_episode_,
+                .episode_returns = episode_returns,
+                .episode_lengths = episode_lengths,
+                .game_returns = game_returns,
+                .game_lengths = game_lengths};
   return {batch, log};
 }
 
@@ -244,12 +259,14 @@ StepResult Rollout::step(const StepInput &input) {
     output.reward = 0.0f;
     output.terminated = false;
     output.truncated = false;
+    output.game_over = false;
   } else {
     auto result = environments_[input.environment_index]->step(input.action);
     observation = result.observation;
     output.reward = result.reward;
     output.terminated = result.terminated;
     output.truncated = result.truncated;
+    output.game_over = result.game_over;
   }
   std::copy(observation.begin(), observation.end(),
             screen_buffers_[input.environment_index].begin());

@@ -11,6 +11,9 @@ struct Step {
   int reward;
   bool terminated;
   bool truncated;
+  // Indicates if the game is completely over.
+  // When true, terminated or truncated must also be true.
+  bool game_over;
 };
 
 class VirtualEnvironment {

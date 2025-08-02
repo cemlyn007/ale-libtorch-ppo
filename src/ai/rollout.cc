@@ -4,6 +4,7 @@
 #include "ai/environment/fire_reset.h"
 #include "ai/environment/max_and_skip.h"
 #include "ai/environment/noop_reset.h"
+#include "ai/environment/reset_on_return.h"
 #include "ai/gae.h"
 #include <cassert>
 
@@ -15,7 +16,8 @@ Rollout::Rollout(
     std::function<ActionResult(const torch::Tensor &)> action_selector,
     float gae_discount, float gae_lambda, const torch::Device &device,
     size_t seed, size_t num_workers, size_t worker_batch_size,
-    size_t frame_skip, std::optional<std::filesystem::path> video_path)
+    size_t frame_skip, ale::reward_t max_return,
+    std::optional<std::filesystem::path> video_path)
     : gae_discount_(gae_discount), gae_lambda_(gae_lambda), rom_path_(rom_path),
       buffer_([&] {
         ale::ALEInterface ale;
@@ -65,6 +67,12 @@ Rollout::Rollout(
     std::unique_ptr<ai::environment::VirtualEnvironment> environment =
         std::make_unique<ai::environment::Environment>(rom_path_, max_steps_,
                                                        grayscale_, i + seed);
+
+    // Atari breakout only has two sets of bricks, once the second set is
+    // cleared, no more bricks will appear.
+    if (max_return > 0.0f)
+      environment = std::make_unique<ai::environment::ResetOnReturnEnvironment>(
+          std::move(environment), max_return);
 
     if (i == 0 && video_path.has_value()) {
       environment = std::make_unique<ai::environment::EpisodeRecorder>(

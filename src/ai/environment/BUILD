@@ -86,3 +86,18 @@ cc_library(
         ":environment",
     ],
 )
+
+cc_library(
+    name = "reset_on_return",
+    srcs = [
+        "reset_on_return.cc",
+    ],
+    hdrs = [
+        "reset_on_return.h",
+    ],
+    strip_include_prefix = "/src",
+    deps = [
+        ":environment",
+        "@arcade_learning_environment//:ale",
+    ],
+)

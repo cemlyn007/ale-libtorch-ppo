@@ -15,6 +15,7 @@ cc_library(
         "//src/ai/environment:fire_reset",
         "//src/ai/environment:max_and_skip",
         "//src/ai/environment:noop_reset",
+        "//src/ai/environment:reset_on_return",
         "@arcade_learning_environment//:ale",
         "@libtorch//:torch",
     ],

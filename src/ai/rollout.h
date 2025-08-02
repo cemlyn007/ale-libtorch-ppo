@@ -49,7 +49,7 @@ public:
           std::function<ActionResult(const torch::Tensor &)> action_selector,
           float gae_discount, float gae_lambda, const torch::Device &device,
           size_t seed, size_t num_workers, size_t worker_batch_size,
-          size_t frame_skip,
+          size_t frame_skip, ale::reward_t max_return = 0.0f,
           std::optional<std::filesystem::path> video_path = std::nullopt);
   ~Rollout();
   RolloutResult rollout();

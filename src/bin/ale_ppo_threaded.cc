@@ -54,6 +54,9 @@ struct Config {
   size_t num_workers;
   size_t worker_batch_size;
   size_t frame_skip;
+  // Some games like breakout have a maximum return
+  // which should be used to reset the environment.
+  float max_return;
 };
 
 google::protobuf::Value get_value(double value) {
@@ -86,6 +89,7 @@ get_hparams(const Config &config) {
   hparams["num_workers"] = get_value(config.num_workers);
   hparams["worker_batch_size"] = get_value(config.worker_batch_size);
   hparams["frame_skip"] = get_value(config.frame_skip);
+  hparams["max_return"] = get_value(config.max_return);
   return hparams;
 }
 
@@ -112,6 +116,7 @@ Config load_config(const std::filesystem::path &path) {
   config.num_workers = node["num_workers"].as<size_t>(16);
   config.worker_batch_size = node["worker_batch_size"].as<size_t>(32);
   config.frame_skip = node["frame_skip"].as<size_t>(4);
+  config.max_return = node["max_return"].as<float>(-1.0f);
   return config;
 }
 
@@ -331,7 +336,8 @@ int main(int argc, char **argv) {
                 output.value.ravel()};
       },
       config.gae_discount, config.gae_lambda, device, 0, config.num_workers,
-      config.worker_batch_size, config.frame_skip, video_path);
+      config.worker_batch_size, config.frame_skip, config.max_return,
+      video_path);
   torch::Tensor indices =
       torch::empty(config.mini_batch_size * config.num_mini_batches,
                    torch::TensorOptions().dtype(torch::kLong).device(device));

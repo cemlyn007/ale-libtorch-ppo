@@ -25,11 +25,11 @@ double get_average_return() { return sum / count; }
 double get_annealed_entropy_coef(double entropy_coef) {
   // This is a simple annealing function that decreases the entropy
   // coefficient as the average return increases.
-  // 400 is the maximum episodic return for playing breakout.
+  // 864 is the maximum episodic return for playing breakout.
   if (!ANNEAL_ENTROPY_COEFFICIENT) {
     return entropy_coef;
   }
-  return entropy_coef * (400.0 - get_average_return()) / 400.0;
+  return entropy_coef * (864.0 - get_average_return()) / 864.0;
 }
 
 struct Config {
@@ -345,7 +345,6 @@ int main(int argc, char **argv) {
                                   config.mini_batch_size, device);
 
   logger.add_hparams(get_hparams(config), group_name, start_time);
-  size_t rollout_index = 0;
   size_t index = 0;
   ai::buffer::Batch b;
   {

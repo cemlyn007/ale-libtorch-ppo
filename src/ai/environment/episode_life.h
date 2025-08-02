@@ -14,6 +14,7 @@ public:
 private:
   std::unique_ptr<VirtualEnvironment> env_;
   int lives_;
+  bool game_over_;
 };
 
 } // namespace ai::environment

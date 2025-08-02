@@ -3,16 +3,17 @@
 namespace ai::environment {
 
 EpisodeLife::EpisodeLife(std::unique_ptr<VirtualEnvironment> env)
-    : env_(std::move(env)), lives_(0) {}
+    : env_(std::move(env)), lives_(0), game_over_(false) {}
 
 ScreenBuffer EpisodeLife::reset() {
   ScreenBuffer observation;
-  if (lives_ > 0 && !env_->get_interface().game_over(false) &&
-      !env_->get_interface().game_truncated()) {
+  if (game_over_) {
+    observation = env_->reset();
+    game_over_ = false;
+  } else {
     auto step_result = env_->step(ale::Action::PLAYER_A_NOOP);
     observation = step_result.observation;
-  } else {
-    observation = env_->reset();
+    game_over_ = step_result.game_over;
   }
   lives_ = env_->get_interface().lives();
   if (lives_ <= 0)
@@ -22,10 +23,11 @@ ScreenBuffer EpisodeLife::reset() {
 
 Step EpisodeLife::step(const ale::Action &action) {
   auto result = env_->step(action);
-  int current_lives = env_->get_interface().lives();
-  bool life_lost = current_lives < lives_;
-  lives_ = current_lives;
-  result.truncated |= (!result.terminated && life_lost);
+  int new_lives = env_->get_interface().lives();
+  bool life_lost = new_lives < lives_;
+  result.terminated |= life_lost;
+  lives_ = new_lives;
+  game_over_ = result.game_over;
   return result;
 }
 

@@ -374,7 +374,8 @@ int main(int argc, char **argv) {
         profiler_config, activities,
         {torch::RecordScope::FUNCTION, torch::RecordScope::USER_SCOPE});
   }
-  while (rollout_index < config.num_rollouts) {
+  for (size_t rollout_index = 0; rollout_index < config.num_rollouts;
+       ++rollout_index) {
     std::cout << "Rollout " << rollout_index + 1 << " of "
               << config.num_rollouts << std::endl;
     static_cast<torch::optim::AdamOptions &>(
@@ -401,7 +402,6 @@ int main(int argc, char **argv) {
                            result.log.episode_returns.end(), 0.0f);
     count += result.log.episode_returns.size();
     index = (index + 1) % config.num_workers;
-    ++rollout_index;
   }
   if (!profile_path.empty()) {
     auto profiler_result = torch::autograd::profiler::disableProfiler();

@@ -52,7 +52,6 @@ git_override(
         ":third_party/hedron_compile_commands.patch",
     ],
 )
-bazel_dep(name = "stb", version = "0.0.0-20241109-5c20573")
 
 bazel_dep(name = "yaml-cpp", version = "0.8.0")
 

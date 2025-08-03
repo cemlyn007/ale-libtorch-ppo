@@ -14,17 +14,18 @@ EpisodeRecorder::EpisodeRecorder(std::unique_ptr<VirtualEnvironment> env,
 ScreenBuffer EpisodeRecorder::reset() {
   ScreenBuffer observation = env_->reset();
   episode_index_++;
-  video_recorder_.add(observation.data());
+  std::filesystem::path path =
+      "episode_" + std::to_string(episode_index_) + ".mp4";
+  video_recorder_.open(path);
+  video_recorder_.write(observation.data());
   return observation;
 }
 
 Step EpisodeRecorder::step(const ale::Action &action) {
   auto result = env_->step(action);
-  video_recorder_.add(result.observation.data());
+  video_recorder_.write(result.observation.data());
   if (result.terminated || result.truncated) {
-    std::filesystem::path path =
-        "episode_" + std::to_string(episode_index_) + ".mp4";
-    video_recorder_.complete(path);
+    video_recorder_.close();
   }
   return result;
 }

@@ -1,7 +1,7 @@
 #include "video_recorder.h"
 #include <filesystem>
-#include <stb_image_write.h>
-#include <stdio.h>
+#include <stdexcept>
+
 namespace ai::video_recorder {
 
 VideoRecorder::VideoRecorder(const std::filesystem::path &video_path,
@@ -19,14 +19,15 @@ VideoRecorder::VideoRecorder(const std::filesystem::path &video_path,
     throw std::runtime_error("Unsupported number of channels");
 }
 
-void VideoRecorder::add(const unsigned char *data) {
-  size_t size = width_ * height_ * channels_;
-  frames_.emplace_back(data, data + size);
+VideoRecorder::~VideoRecorder() {
+  if (ffmpeg_stream_) {
+    close();
+  }
 }
 
-void VideoRecorder::complete(std::filesystem::path &path) {
-  if (frames_.empty())
-    throw std::runtime_error("No frames to write to video");
+void VideoRecorder::open(const std::filesystem::path &path) {
+  if (ffmpeg_stream_)
+    throw std::runtime_error("Video recording has already started");
   std::string command = "ffmpeg -y -f rawvideo -vcodec rawvideo -pix_fmt " +
                         pixel_format_ + " -s " + std::to_string(width_) + "x" +
                         std::to_string(height_) + " -r " +
@@ -34,15 +35,26 @@ void VideoRecorder::complete(std::filesystem::path &path) {
                         " -i - -c:v libx264 -pix_fmt yuv420p -hide_banner "
                         "-loglevel error " +
                         (video_path_ / path).string();
-  auto stream = popen(command.data(), "w");
-  if (!stream)
+  ffmpeg_stream_ = popen(command.data(), "w");
+  if (!ffmpeg_stream_)
     throw std::runtime_error("Failed to open pipe for ffmpeg");
-  for (const auto &frame : frames_)
-    fwrite(frame.data(), sizeof(unsigned char), frame.size(), stream);
-  int status = pclose(stream);
-  if (status == -1)
+}
+
+void VideoRecorder::write(const unsigned char *data) {
+  if (!ffmpeg_stream_)
+    throw std::runtime_error("Video recording has not been started");
+  size_t size = width_ * height_ * channels_;
+  fwrite(data, sizeof(unsigned char), size, ffmpeg_stream_);
+}
+
+void VideoRecorder::close() {
+  if (!ffmpeg_stream_)
+    throw std::runtime_error("Video recording has not been started");
+  int status = pclose(ffmpeg_stream_);
+  if (status == -1) {
     throw std::runtime_error("Error reported by pclose()");
-  frames_.clear();
+  }
+  ffmpeg_stream_ = nullptr;
 }
 
 } // namespace ai::video_recorder

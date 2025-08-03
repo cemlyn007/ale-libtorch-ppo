@@ -9,15 +9,20 @@
                     "--compilation_mode=dbg",
                     "--features=oso_prefix_is_pwd",
                     "--strip=never",
-                    "//src:ale_libtorch_example"
+                    "//src/bin:ale_ppo_threaded",
                 ]
             },
             "linux": {
                 "command": "bazel",
                 "args": [
                     "build",
+                    "--jobs",
+                    "auto",
                     "--compilation_mode=dbg",
-                    "//src:ale_libtorch_example"
+                    "--features=oso_prefix_is_pwd",
+                    "--strip=never",
+                    "--spawn_strategy=local",
+                    "//src/bin:ale_ppo_threaded",
                 ]
             },
             "label": "build",
@@ -37,9 +42,9 @@
                 "auto",
                 "--",
                 "${workspaceFolder}/roms/breakout.bin",
-                "${workspaceFolder}/logs/05-07-25-v0/tfevents.out.tfevents",
-                "${workspaceFolder}/images/05-07-25-v0",
-                "05-07-25-v0",
+                "${workspaceFolder}/logs/${input:runName}/tfevents.out.tfevents",
+                "${workspaceFolder}/images/${input:runName}",
+                "${input:runName}",
                 "${workspaceFolder}/configs/v0.yaml"
             ],
             "label": "run",
@@ -49,6 +54,13 @@
                 "isDefault": true
             },
             "problemMatcher": []
+        }
+    ],
+    "inputs": [
+        {
+            "id": "runName",
+            "description": "Enter the name for the run",
+            "type": "promptString",
         }
     ]
 }

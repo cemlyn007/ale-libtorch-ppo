@@ -174,8 +174,8 @@ void log_data(TensorBoardLogger &logger, const ai::rollout::Log &log,
   logger.add_scalar("mean_ratio", log.steps,
                     mean(metrics.ratio, metrics.masks));
   if (metrics.clipped_gradients.numel() > 1)
-  logger.add_histogram("clipped_gradients", log.steps,
-                       to_vector(metrics.clipped_gradients));
+    logger.add_histogram("clipped_gradients", log.steps,
+                         to_vector(metrics.clipped_gradients));
   logger.add_histogram("losses", log.steps,
                        gather(metrics.total_losses, metrics.masks));
   logger.add_histogram("clipped_losses", log.steps,
@@ -284,6 +284,33 @@ ai::ppo::train::Hyperparameters prepare_hyperparameters(const Config &config) {
   return hp;
 }
 
+void enable_torch_determinism(uint64_t seed) {
+  // As per the logged warning by LibTorch: "Warning: Deterministic behavior was
+  // enabled with either `torch.use_deterministic_algorithms(True)` or
+  // `at::Context::setDeterministicAlgorithms(true)`, but this operation is not
+  // deterministic because it uses CuBLAS and you have CUDA >= 10.2. To enable
+  // deterministic behavior in this case, you must set an environment variable
+  // before running your PyTorch application: CUBLAS_WORKSPACE_CONFIG=:4096:8 or
+  // CUBLAS_WORKSPACE_CONFIG=:16:8. For more information, go to
+  // https://docs.nvidia.com/cuda/cublas/index.html#results-reproducibility
+  // (function alertCuBLASConfigNotDeterministic)"
+  setenv("CUBLAS_WORKSPACE_CONFIG", ":4096:8", 1);
+
+  torch::manual_seed(seed);
+
+  // Enable deterministic algorithms, throw errors for non-deterministic
+  // operations
+  torch::globalContext().setDeterministicAlgorithms(true, true);
+
+  // If using CUDA, ensure CuDNN is deterministic
+  if (torch::cuda::is_available()) {
+    torch::globalContext().setDeterministicCuDNN(true);
+  }
+
+  // Optionally, enable filling uninitialized memory for additional determinism
+  torch::globalContext().setDeterministicFillUninitializedMemory(true);
+}
+
 int main(int argc, char **argv) {
   const auto start_time =
       std::chrono::system_clock::now().time_since_epoch().count();
@@ -312,7 +339,7 @@ int main(int argc, char **argv) {
     std::filesystem::create_directories(video_path);
   }
 
-  torch::manual_seed(42);
+  enable_torch_determinism(42);
 
   TensorBoardLogger logger(logger_path);
   Network network(config.hidden_size, config.action_size);

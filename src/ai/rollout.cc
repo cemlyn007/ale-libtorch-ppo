@@ -1,5 +1,6 @@
 #include "rollout.h"
 #include "ai/environment/episode_life.h"
+#include "ai/environment/episode_observation_recorder.h"
 #include "ai/environment/episode_recorder.h"
 #include "ai/environment/fire_reset.h"
 #include "ai/environment/max_and_skip.h"
@@ -17,7 +18,7 @@ Rollout::Rollout(
     float gae_discount, float gae_lambda, const torch::Device &device,
     size_t seed, size_t num_workers, size_t worker_batch_size,
     size_t frame_skip, ale::reward_t max_return,
-    std::optional<std::filesystem::path> video_path)
+    std::optional<std::filesystem::path> video_path, bool record_observation)
     : gae_discount_(gae_discount), gae_lambda_(gae_lambda), rom_path_(rom_path),
       buffer_([&] {
         ale::ALEInterface ale;
@@ -41,7 +42,7 @@ Rollout::Rollout(
       game_returns_(total_environments, 0.0f),
       game_lengths_(total_environments, 0), action_selector_(action_selector),
       device_(device), environments_(), stop_(), batch_size_(worker_batch_size),
-      grayscale_(grayscale) {
+      grayscale_(grayscale), record_observation_(record_observation) {
   if (total_environments_ == 0) {
     throw std::invalid_argument("Total environments must be greater than 0.");
   }
@@ -75,8 +76,13 @@ Rollout::Rollout(
           std::move(environment), max_return);
 
     if (i == 0 && video_path.has_value()) {
-      environment = std::make_unique<ai::environment::EpisodeRecorder>(
-          std::move(environment), video_path.value(), grayscale_);
+      if (record_observation_)
+        environment =
+            std::make_unique<ai::environment::EpisodeObservationRecorder>(
+                std::move(environment), video_path.value(), grayscale_);
+      else
+        environment = std::make_unique<ai::environment::EpisodeRecorder>(
+            std::move(environment), video_path.value(), false);
     }
     // TODO: Make this configurable.
     environment = std::make_unique<ai::environment::NoopResetEnvironment>(

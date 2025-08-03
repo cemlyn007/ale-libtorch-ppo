@@ -1,5 +1,5 @@
-#include "ai/ppo/losses.h"
 #include "ai/ppo/train.h"
+#include "ai/ppo/losses.h"
 #include "ai/rollout.h"
 #include "ai/vision.h"
 #include "tensorboard_logger.h"
@@ -57,6 +57,9 @@ struct Config {
   // Some games like breakout have a maximum return
   // which should be used to reset the environment.
   float max_return;
+  // It is faster to record using the observation.
+  // However the observation may be in grayscale.
+  bool record_observation;
 };
 
 google::protobuf::Value get_value(double value) {
@@ -65,8 +68,14 @@ google::protobuf::Value get_value(double value) {
   return val;
 }
 
+google::protobuf::Value get_bool_value(bool value) {
+  google::protobuf::Value val;
+  val.set_bool_value(value);
+  return val;
+}
+
 std::map<std::string, google::protobuf::Value>
-get_hparams(const Config &config) {
+get_parameters(const Config &config) {
   std::map<std::string, google::protobuf::Value> hparams;
   hparams["total_environments"] = get_value(config.total_environments);
   hparams["hidden_size"] = get_value(config.hidden_size);
@@ -90,6 +99,7 @@ get_hparams(const Config &config) {
   hparams["worker_batch_size"] = get_value(config.worker_batch_size);
   hparams["frame_skip"] = get_value(config.frame_skip);
   hparams["max_return"] = get_value(config.max_return);
+  hparams["record_observation"] = get_bool_value(config.record_observation);
   return hparams;
 }
 
@@ -117,6 +127,7 @@ Config load_config(const std::filesystem::path &path) {
   config.worker_batch_size = node["worker_batch_size"].as<size_t>(32);
   config.frame_skip = node["frame_skip"].as<size_t>(4);
   config.max_return = node["max_return"].as<float>(-1.0f);
+  config.record_observation = node["record_observation"].as<bool>(false);
   return config;
 }
 
@@ -373,7 +384,7 @@ int main(int argc, char **argv) {
   ai::ppo::train::Metrics metrics(config.num_epochs, config.num_mini_batches,
                                   config.mini_batch_size, device);
 
-  logger.add_hparams(get_hparams(config), group_name, start_time);
+  logger.add_hparams(get_parameters(config), group_name, start_time);
 
   ai::buffer::Batch b;
   {

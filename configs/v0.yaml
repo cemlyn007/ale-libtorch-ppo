@@ -21,3 +21,4 @@ worker_batch_size: 1
 frame_skip: 4
 # Breakout max possible score.
 max_return: 864
+record_observation: false

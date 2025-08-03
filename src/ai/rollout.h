@@ -50,7 +50,8 @@ public:
           float gae_discount, float gae_lambda, const torch::Device &device,
           size_t seed, size_t num_workers, size_t worker_batch_size,
           size_t frame_skip, ale::reward_t max_return = 0.0f,
-          std::optional<std::filesystem::path> video_path = std::nullopt);
+          std::optional<std::filesystem::path> video_path = std::nullopt,
+          bool record_observation = false);
   ~Rollout();
   RolloutResult rollout();
   void update_observations();
@@ -98,6 +99,7 @@ private:
   ai::queue::Queue<StepResult> step_queue_;
   size_t batch_size_;
   bool grayscale_;
+  bool record_observation_;
 };
 
 } // namespace ai::rollout

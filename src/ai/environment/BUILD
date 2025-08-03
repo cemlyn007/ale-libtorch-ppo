@@ -30,6 +30,22 @@ cc_library(
 )
 
 cc_library(
+    name = "episode_observation_recorder",
+    srcs = [
+        "episode_observation_recorder.cc",
+    ],
+    hdrs = [
+        "episode_observation_recorder.h",
+    ],
+    strip_include_prefix = "/src",
+    deps = [
+        ":environment",
+        "//src/ai:video_recorder",
+        "@arcade_learning_environment//:ale",
+    ],
+)
+
+cc_library(
     name = "episode_recorder",
     srcs = [
         "episode_recorder.cc",

@@ -11,6 +11,7 @@ cc_library(
         ":queue",
         "//src/ai/environment",
         "//src/ai/environment:episode_life",
+        "//src/ai/environment:episode_observation_recorder",
         "//src/ai/environment:episode_recorder",
         "//src/ai/environment:fire_reset",
         "//src/ai/environment:max_and_skip",

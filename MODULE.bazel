@@ -1,8 +1,8 @@
 """
-ALE Bazel
+ALE LibTorch PPO
 """
 module(
-    name = "hello_world_cpp",
+    name = "ale_libtorch_ppo",
     version = "0.1.0",
 )
 

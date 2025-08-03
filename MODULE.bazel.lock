@@ -194,7 +194,7 @@
     "@@rules_cuda+//cuda:extensions.bzl%toolchain": {
       "general": {
         "bzlTransitiveDigest": "PCc5fztyozVZykRr2KwRS46NyUg9BXP7HwgufplbFAs=",
-        "usagesDigest": "LAnzdm1+eoDPsG+bDf+waHOxKhWdheuGFLWn4RubkAk=",
+        "usagesDigest": "anB4Ou9780SZuZBUjvMpeD8txOUS+MgPvC5+rAp9jQE=",
         "recordedFileInputs": {},
         "recordedDirentsInputs": {},
         "envVariables": {},
@@ -236,7 +236,7 @@
     "@@rules_foreign_cc+//foreign_cc:extensions.bzl%tools": {
       "general": {
         "bzlTransitiveDigest": "MW4A97mMGuraW70byeL5iUdP+6qprG8t1UShiMJdD8s=",
-        "usagesDigest": "PtphUKKG0WGhexsaNsPSx5LF5+FbqERL9lS/ocBqUfI=",
+        "usagesDigest": "pDX9S2WttXDg0cfVUEeWca6Omr+ANdc0TP6RS5KSAOc=",
         "recordedFileInputs": {},
         "recordedDirentsInputs": {},
         "envVariables": {},

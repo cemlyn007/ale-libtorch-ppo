@@ -2,7 +2,7 @@
 
 <p align="center"><a href="https://youtu.be/MQsjzNbIrsQ"><img src="https://github.com/user-attachments/assets/f8b027b6-2294-4142-8fad-549f830d48a3" width="400"></a></p>
 
-This project is a C++ application designed to train an agent to master Atari games, with a specific focus on the classic game "Breakout". It leverages reinforcement learning, implementing the Proximal Policy Optimization (PPO) algorithm to enable the agent to learn and improve its gameplay through trial and error. Multi-threading is used to achieve greater throughput for interacting with the game environment in parallel.
+This project is a C++ application designed to train an agent to master Atari games, with a specific focus on the classic game "Breakout". It leverages reinforcement learning, implementing the Proximal Policy Optimisation (PPO) algorithm to enable the agent to learn and improve its gameplay through trial and error. Multi-threading is used to achieve greater throughput for interacting with the game environment in parallel.
 
 Built using Bazel, this project integrates `libtorch` (the C++ frontend for PyTorch) for its neural network components and the Arcade Learning Environment (ALE) to interface with the Atari games. This combination provides a high-performance environment for cutting-edge AI research.
 

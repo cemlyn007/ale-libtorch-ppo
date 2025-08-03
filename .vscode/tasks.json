@@ -45,7 +45,7 @@
                 "${workspaceFolder}/logs/${input:runName}/tfevents.out.tfevents",
                 "${workspaceFolder}/images/${input:runName}",
                 "${input:runName}",
-                "${workspaceFolder}/configs/v0.yaml"
+                "${workspaceFolder}/configs/${input:configName}.yaml"
             ],
             "label": "run",
             "type": "shell",
@@ -61,6 +61,12 @@
             "id": "runName",
             "description": "Enter the name for the run",
             "type": "promptString",
+        },
+        {
+            "id": "configName",
+            "description": "Enter the name for the config name",
+            "type": "promptString",
+            "default": "v0",
         }
     ]
 }

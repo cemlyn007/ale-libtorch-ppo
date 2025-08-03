@@ -3,8 +3,8 @@ load("@rules_cc//cc:defs.bzl", "cc_binary")
 package(default_visibility = ["//visibility:public"])
 
 cc_binary(
-    name = "ale_ppo_threaded",
-    srcs = ["ale_ppo_threaded.cc"],
+    name = "train",
+    srcs = ["train.cc"],
     deps = [
         "//src:ai",
         "@arcade_learning_environment//:ale",

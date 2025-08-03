@@ -8,7 +8,7 @@
             "name": "(gdb) Launch",
             "type": "cppdbg",
             "request": "launch",
-            "program": "${workspaceFolder}/bazel-bin/src/bin/ale_ppo_threaded.runfiles/_main/src/bin/ale_ppo_threaded",
+            "program": "${workspaceFolder}/bazel-bin/src/bin/train.runfiles/_main/src/bin/train",
             "args": [
                 "${workspaceFolder}/roms/breakout.bin",
                 "${workspaceFolder}/logs/debug/tfevents.out.tfevents",
@@ -34,7 +34,7 @@
             "name": "(lldb) Launch",
             "type": "lldb",
             "request": "launch",
-            "program": "${workspaceFolder}/bazel-bin/src/bin/ale_ppo_threaded.runfiles/_main/src/bin/ale_ppo_threaded",
+            "program": "${workspaceFolder}/bazel-bin/src/bin/train.runfiles/_main/src/bin/train",
             "cwd": "${workspaceFolder}",
             "args": [
                 "${workspaceFolder}/roms/breakout.bin",

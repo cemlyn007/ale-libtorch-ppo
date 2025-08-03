@@ -9,7 +9,7 @@
                     "--compilation_mode=dbg",
                     "--features=oso_prefix_is_pwd",
                     "--strip=never",
-                    "//src/bin:ale_ppo_threaded",
+                    "//src/bin:train",
                 ]
             },
             "linux": {
@@ -22,7 +22,7 @@
                     "--features=oso_prefix_is_pwd",
                     "--strip=never",
                     "--spawn_strategy=local",
-                    "//src/bin:ale_ppo_threaded",
+                    "//src/bin:train",
                 ]
             },
             "label": "build",
@@ -37,7 +37,7 @@
             "args": [
                 "run",
                 "--compilation_mode=opt",
-                "//src/bin:ale_ppo_threaded",
+                "//src/bin:train",
                 "--jobs",
                 "auto",
                 "--",

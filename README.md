@@ -58,13 +58,13 @@ There are three views for profiling this application, using `./scripts/flamegrap
 
 ## Contributions Welcome
 
-We welcome contributions from the community! If you're interested in improving `ALE-libtorch-PPO`, here are some ways you can help:
+I welcome contributions from the community! If you're interested in improving `ALE-libtorch-PPO`, here are some ways you can help:
 
 *   **Reporting Bugs:** If you find a bug, please open an issue and provide as much detail as possible.
-*   **Suggesting Enhancements:** Have an idea for a new feature or an improvement to an existing one? We'd love to hear it.
-*   **Code Contributions:** If you'd like to contribute code, please fork the repository and submit a pull request. We appreciate all contributions, from small bug fixes to major new features.
+*   **Suggesting Enhancements:** Have an idea for a new feature or an improvement to an existing one? I'd love to hear it.
+*   **Code Contributions:** If you'd like to contribute code, please fork the repository and submit a pull request. I appreciate all contributions, from small bug fixes to major new features.
 
-We look forward to collaborating with you!
+I look forward to collaborating with you!
 
 ## Acknowledgements
 

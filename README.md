@@ -2,7 +2,7 @@
 
 <p align="center"><a href="https://youtu.be/MQsjzNbIrsQ"><img src="https://github.com/user-attachments/assets/f8b027b6-2294-4142-8fad-549f830d48a3" width="400"></a></p>
 
-This project is a C++ application designed to train an agent to master Atari games, with a specific focus on the classic game "Breakout". It leverages reinforcement learning, implementing the Proximal Policy Optimization (PPO) algorithm to enable the agent to learn and improve its gameplay through trial and error.
+This project is a C++ application designed to train an agent to master Atari games, with a specific focus on the classic game "Breakout". It leverages reinforcement learning, implementing the Proximal Policy Optimization (PPO) algorithm to enable the agent to learn and improve its gameplay through trial and error. Multi-threading is used to achieve greater throughput for interacting with the game environment in parallel.
 
 Built using Bazel, this project integrates `libtorch` (the C++ frontend for PyTorch) for its neural network components and the Arcade Learning Environment (ALE) to interface with the Atari games. This combination provides a high-performance environment for cutting-edge AI research.
 
@@ -52,6 +52,9 @@ Achieved 10 million agent steps in 38 minutes and 40 seconds, using the v0 confi
 ### V1 Config
 <p align="center"><img width="400" alt="TensorBoard showing PPO achieving the maximum score on Breakout of 864." src="https://github.com/user-attachments/assets/01a93c11-a96a-4975-b3f3-4743591b8a4a" /></p>
 Achieved an average of ~14,326 steps per second, with video recording enabled, with hardware still not fully utilised.
+
+## Profiling
+There are three views for profiling this application, using `./scripts/flamegraph.sh`, running the application with a 6th command line argument which specifies where to save the Perfetto profile, lastly you can use nsys to profile the application. The flamegraph script will generate a flamegraph of the application, which can be viewed in a web browser. The Perfetto profile can be opened in the Perfetto UI, and NVIDIA Nsight Systems UI can also be used for profiling if you hook up the path to the `train` binary.
 
 ## Contributions Welcome
 

@@ -14,19 +14,20 @@ To run the project, follow these steps:
 1. Install Bazel by following the [Bazel installation guide](https://bazel.build/install) for your operating system.
 
 2. Clone the repository:
-   ```bash
+   ```shell
    git clone https://github.com/cemlyn007/ALE-libtorch-PPO.git
    cd ALE-libtorch-PPO
    ```
 
 3. Download the ROMs:
-   ```bash
+   ```shell
+   mkdir roms
    ./scripts/download_unpack_roms.sh
    ```
 
 4. Train the agent using Bazel:
-   ```bash
-   bazel run //src/bin:train --compilation_mode=opt -- roms/breakout.bin logs/train video/train train configs/v0.yaml
+   ```shell
+   bazel run //src/bin:train --compilation_mode=opt -- $(pwd)/roms/breakout.bin $(pwd)/logs/train $(pwd)/video/train train $(pwd)/configs/v0.yaml
    ```
    Or alternatively, with VS Code, you can run the tasks. The command line arguments do the following:
    1. Specify which ROM to use.

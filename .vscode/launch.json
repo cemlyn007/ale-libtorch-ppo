@@ -14,7 +14,7 @@
                 "${workspaceFolder}/logs/debug/tfevents.out.tfevents",
                 "${workspaceFolder}/videos/debug",
                 "debug_group",
-                "${workspaceFolder}/configs/v0.yaml",
+                "${workspaceFolder}/configs/debug.yaml",
             ],
             "stopAtEntry": false,
             "cwd": "${workspaceFolder}",
@@ -41,7 +41,7 @@
                 "${workspaceFolder}/logs/debug/tfevents.out.tfevents",
                 "${workspaceFolder}/videos/debug",
                 "debug_group",
-                "${workspaceFolder}/configs/v0.yaml",
+                "${workspaceFolder}/configs/debug.yaml",
             ],
             "sourceMap": {
                 "/proc/self/cwd": "${workspaceFolder}",

@@ -1,5 +1,5 @@
 """
-ALE LibTorch PPO
+ALE libtorch PPO
 """
 module(
     name = "ale_libtorch_ppo",

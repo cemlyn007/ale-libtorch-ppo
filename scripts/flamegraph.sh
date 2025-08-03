@@ -19,7 +19,7 @@ mkdir -p $tmp_directory
 echo "Require sudo to run perf:"
 trap 'echo -e "\nProgram stopped by user. Continuing with flamegraph generation..."' SIGINT
 # bazel-bin/src/bin/train.runfiles/_main/src/bin/train
-sudo perf record -b -g --output=$perf_file_path $workspace/bazel-bin/src/bin/train $workspace/roms/breakout.bin $workspace/logs/perf $workspace/images/perf perf $workspace/configs/v0.yaml || true
+sudo perf record -b -g --output=$perf_file_path $workspace/bazel-bin/src/bin/train $workspace/roms/breakout.bin $workspace/logs/perf $workspace/videos/perf perf $workspace/configs/v0.yaml || true
 trap - SIGINT
 sudo chown $USER $perf_file_path
 

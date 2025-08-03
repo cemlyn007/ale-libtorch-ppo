@@ -12,7 +12,7 @@
             "args": [
                 "${workspaceFolder}/roms/breakout.bin",
                 "${workspaceFolder}/logs/debug/tfevents.out.tfevents",
-                "${workspaceFolder}/images/debug",
+                "${workspaceFolder}/videos/debug",
                 "debug_group",
                 "${workspaceFolder}/configs/v0.yaml",
             ],
@@ -39,7 +39,7 @@
             "args": [
                 "${workspaceFolder}/roms/breakout.bin",
                 "${workspaceFolder}/logs/debug/tfevents.out.tfevents",
-                "${workspaceFolder}/images/debug",
+                "${workspaceFolder}/videos/debug",
                 "debug_group",
                 "${workspaceFolder}/configs/v0.yaml",
             ],

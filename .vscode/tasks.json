@@ -43,7 +43,7 @@
                 "--",
                 "${workspaceFolder}/roms/breakout.bin",
                 "${workspaceFolder}/logs/${input:runName}/tfevents.out.tfevents",
-                "${workspaceFolder}/images/${input:runName}",
+                "${workspaceFolder}/videos/${input:runName}",
                 "${input:runName}",
                 "${workspaceFolder}/configs/${input:configName}.yaml"
             ],

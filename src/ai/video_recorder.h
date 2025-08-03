@@ -19,6 +19,7 @@ private:
   size_t width_;
   size_t height_;
   size_t fps_;
-  std::vector<unsigned char> frames_;
+  std::string pixel_format_;
+  std::vector<std::vector<unsigned char>> frames_;
 };
 } // namespace ai::video_recorder

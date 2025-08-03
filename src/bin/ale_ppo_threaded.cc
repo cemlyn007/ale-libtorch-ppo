@@ -146,7 +146,7 @@ std::vector<float> to_vector(const torch::Tensor &tensor) {
 }
 
 void log_data(TensorBoardLogger &logger, const ai::rollout::Log &log,
-              const ai::ppo::train::Metrics &metrics) {
+              const ai::ppo::train::Metrics &metrics, double lr) {
   if (!log.episode_returns.empty()) {
     logger.add_scalar("mean_episode_return", log.steps,
                       mean(log.episode_returns));
@@ -190,6 +190,8 @@ void log_data(TensorBoardLogger &logger, const ai::rollout::Log &log,
                        gather(metrics.advantages, metrics.masks));
   logger.add_histogram("returns", log.steps,
                        gather(metrics.returns, metrics.masks));
+
+  logger.add_scalar("learning_rate", log.steps, lr);
 }
 
 torch::nn::Conv2d layer_init(torch::nn::Conv2d layer,
@@ -345,7 +347,7 @@ int main(int argc, char **argv) {
                                   config.mini_batch_size, device);
 
   logger.add_hparams(get_hparams(config), group_name, start_time);
-  size_t index = 0;
+
   ai::buffer::Batch b;
   {
     torch::NoGradGuard no_grad;
@@ -377,10 +379,11 @@ int main(int argc, char **argv) {
        ++rollout_index) {
     std::cout << "Rollout " << rollout_index + 1 << " of "
               << config.num_rollouts << std::endl;
+    auto lr = config.learning_rate *
+              (1.0 - rollout_index / static_cast<double>(config.num_rollouts));
     static_cast<torch::optim::AdamOptions &>(
         optimizer.param_groups()[0].options())
-        .lr(config.learning_rate *
-            (1.0 - rollout_index / static_cast<double>(config.num_rollouts)));
+        .lr(lr);
 
     {
       torch::NoGradGuard no_grad;
@@ -396,11 +399,13 @@ int main(int argc, char **argv) {
                             config.num_epochs, config.num_mini_batches, hp);
     }
 
-    log_data(logger, result.log, metrics);
+    log_data(logger, result.log, metrics,
+             static_cast<torch::optim::AdamOptions &>(
+                 optimizer.param_groups()[0].options())
+                 .lr());
     sum += std::accumulate(result.log.episode_returns.begin(),
                            result.log.episode_returns.end(), 0.0f);
     count += result.log.episode_returns.size();
-    index = (index + 1) % config.num_workers;
   }
   if (!profile_path.empty()) {
     auto profiler_result = torch::autograd::profiler::disableProfiler();

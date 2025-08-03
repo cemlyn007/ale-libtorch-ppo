@@ -47,15 +47,7 @@ cc_library(
     name = "video_recorder",
     srcs = ["video_recorder.cc"],
     hdrs = ["video_recorder.h"],
-    copts = [
-        "-DSTB_IMAGE_IMPLEMENTATION",
-        "-DSTB_IMAGE_WRITE_IMPLEMENTATION",
-    ],
     strip_include_prefix = "/src",
-    deps = [
-        "@stb//:stb_image",
-        "@stb//:stb_image_write",
-    ],
 )
 
 cc_library(

@@ -1,0 +1,23 @@
+total_environments: 4096
+hidden_size: 512
+action_size: 4
+horizon: 5
+max_steps: 108000
+frame_stack: 4
+learning_rate: 0.00025
+clip_param: 0.2
+value_loss_coef: 0.4
+entropy_coef: 0.01
+num_epochs: 1
+mini_batch_size: 1280
+num_mini_batches: 16
+gae_discount: 0.99
+gae_lambda: 0.95
+max_gradient_norm: 0.5
+num_rollouts: 1000000
+log_episode_frequency: 10
+num_workers: 32
+worker_batch_size: 8
+frame_skip: 4
+# Breakout max possible score.
+max_return: 864

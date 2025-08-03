@@ -55,6 +55,7 @@
             },
             "problemMatcher": [],
             "runOptions": {
+                "instanceLimit": 100,
                 "instancePolicy": "silent",
                 "reevaluateOnRerun": true
             }

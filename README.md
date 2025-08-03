@@ -65,3 +65,12 @@ We welcome contributions from the community! If you're interested in improving `
 *   **Code Contributions:** If you'd like to contribute code, please fork the repository and submit a pull request. We appreciate all contributions, from small bug fixes to major new features.
 
 We look forward to collaborating with you!
+
+## Acknowledgements
+
+Obviously, the authors of any of the libraries & tools used in this project deserve credit, including but not limited to:
+*   [libtorch](https://pytorch.org/cppdocs/)
+*   [Arcade Learning Environment](https://github.com/Farama-Foundation/Arcade-Learning-Environment)
+*   [Bazel](https://bazel.build/)
+
+Additionally, kudos to Costa Huang who authored [CleanRL](https://github.com/vwxyzjn/cleanrl) which served as a baseline for comparing the results of this project.

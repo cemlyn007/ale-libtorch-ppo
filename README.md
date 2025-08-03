@@ -74,3 +74,7 @@ Obviously, the authors of any of the libraries & tools used in this project dese
 *   [Bazel](https://bazel.build/)
 
 Additionally, kudos to Costa Huang who authored [CleanRL](https://github.com/vwxyzjn/cleanrl) which served as a baseline for comparing the results of this project.
+
+## In Memory
+
+This project is dedicated to my late Gran, who always supported my endeavours. I love you, Gran.

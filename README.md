@@ -6,26 +6,28 @@ This project is a C++ application designed to train an agent to master Atari gam
 
 Built using Bazel, this project integrates `libtorch` (the C++ frontend for PyTorch) for its neural network components and the Arcade Learning Environment (ALE) to interface with the Atari games. This combination provides a high-performance environment for cutting-edge AI research.
 
-While Python-based libraries dominate the open-source RL scene by offering ease of use and a vast ecosystem, `ALE-libtorch-PPO` contributes a high-performance, C++-native alternative. It is designed for developers and researchers who need maximum performance, a clean C++ integration path, and a transparent, focused implementation of a state-of-the-art RL algorithm.
+While Python-based libraries dominate the open-source RL scene by offering ease of use and a vast ecosystem, `ALE-libtorch-PPO` contributes a high-performance, C++-native alternative. It is designed for developers and researchers who need high performance, a clean C++ integration path, and a transparent, focused implementation of a strong & popular RL algorithm.
 
 ## Run Instructions
 To run the project, follow these steps:
 
 1. Install Bazel by following the [Bazel installation guide](https://bazel.build/install) for your operating system.
 
-2. Clone the repository:
+2. Install FFmpeg which the environment video recorder uses to generate MP4s of the agent playing the game.
+
+3. Clone the repository:
    ```shell
    git clone https://github.com/cemlyn007/ALE-libtorch-PPO.git
    cd ALE-libtorch-PPO
    ```
 
-3. Download the ROMs:
+4. Download the ROMs:
    ```shell
    mkdir roms
    ./scripts/download_unpack_roms.sh
    ```
 
-4. Train the agent using Bazel:
+5. Train the agent using Bazel:
    ```shell
    bazel run //src/bin:train --compilation_mode=opt -- $(pwd)/roms/breakout.bin $(pwd)/logs/train $(pwd)/video/train train $(pwd)/configs/v0.yaml
    ```
@@ -36,6 +38,20 @@ To run the project, follow these steps:
    4. Specify the group name used for logging parameters to TensorBoard.
    5. Specify the path to the YAML file containing the config to use for running the application.
    6. Optional: specify the location to write a libtorch profile to which can be examined using Perfetto.
+  
+## Results
+Evaluated using the following hardware:
+* ASUS ROG STRIX X670E-F GAMING WIFI
+* AMD Ryzen™ 9 7950X3D × 32
+* NVIDIA GeForce RTX™ 4090
+
+### V0 Config
+<p align="center"><img width="400" alt="TensorBoard showing PPO achieving score of 400 on Breakout within 10 million agent steps." src="https://github.com/user-attachments/assets/2b83c03f-95a5-4185-bbb3-e84a2848012c" /></p>
+Achieved 10 million agent steps in 38 minutes and 40 seconds, using the v0 config, with an average steps per second of ~4310 with video recording enabled as well.
+
+### V1 Config
+<p align="center"><img width="400" alt="TensorBoard showing PPO achieving the maximum score on Breakout of 864." src="https://github.com/user-attachments/assets/01a93c11-a96a-4975-b3f3-4743591b8a4a" /></p>
+Achieved an average of ~14,326 steps per second, with video recording enabled, with hardware still not fully utilised.
 
 ## Contributions Welcome
 

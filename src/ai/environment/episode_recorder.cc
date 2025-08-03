@@ -24,9 +24,8 @@ ScreenBuffer EpisodeRecorder::reset() {
 Step EpisodeRecorder::step(const ale::Action &action) {
   auto result = env_->step(action);
   video_recorder_.write(result.observation.data());
-  if (result.terminated || result.truncated) {
+  if (result.terminated || result.truncated)
     video_recorder_.close();
-  }
   return result;
 }
 

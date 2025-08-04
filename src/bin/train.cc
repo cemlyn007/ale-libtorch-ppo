@@ -11,7 +11,6 @@
 #include <torch/torch.h>
 #include <yaml-cpp/yaml.h>
 
-const bool USE_CUDA_GRAPH = false;
 const bool PREPROCESSED_GRAYSCALE = true;
 const bool ANNEAL_ENTROPY_COEFFICIENT = false;
 
@@ -50,7 +49,6 @@ struct Config {
   float gae_lambda;
   float max_gradient_norm;
   size_t num_rollouts;
-  size_t log_episode_frequency;
   size_t num_workers;
   size_t worker_batch_size;
   size_t frame_skip;
@@ -60,6 +58,8 @@ struct Config {
   // It is faster to record using the observation.
   // However the observation may be in grayscale.
   bool record_observation;
+  bool cuda_graph;
+  bool deterministic;
 };
 
 google::protobuf::Value get_value(double value) {
@@ -94,12 +94,13 @@ get_parameters(const Config &config) {
   hparams["gae_lambda"] = get_value(config.gae_lambda);
   hparams["max_gradient_norm"] = get_value(config.max_gradient_norm);
   hparams["num_rollouts"] = get_value(config.num_rollouts);
-  hparams["log_episode_frequency"] = get_value(config.log_episode_frequency);
   hparams["num_workers"] = get_value(config.num_workers);
   hparams["worker_batch_size"] = get_value(config.worker_batch_size);
   hparams["frame_skip"] = get_value(config.frame_skip);
   hparams["max_return"] = get_value(config.max_return);
   hparams["record_observation"] = get_bool_value(config.record_observation);
+  hparams["cuda_graph"] = get_bool_value(config.cuda_graph);
+  hparams["deterministic"] = get_bool_value(config.deterministic);
   return hparams;
 }
 
@@ -122,12 +123,13 @@ Config load_config(const std::filesystem::path &path) {
   config.gae_lambda = node["gae_lambda"].as<float>(0.95f);
   config.max_gradient_norm = node["max_gradient_norm"].as<float>(0.5f);
   config.num_rollouts = node["num_rollouts"].as<size_t>(7000);
-  config.log_episode_frequency = node["log_episode_frequency"].as<size_t>(10);
   config.num_workers = node["num_workers"].as<size_t>(16);
   config.worker_batch_size = node["worker_batch_size"].as<size_t>(32);
   config.frame_skip = node["frame_skip"].as<size_t>(4);
   config.max_return = node["max_return"].as<float>(-1.0f);
   config.record_observation = node["record_observation"].as<bool>(false);
+  config.cuda_graph = node["cuda_graph"].as<bool>(false);
+  config.deterministic = node["deterministic"].as<bool>(false);
   return config;
 }
 
@@ -350,7 +352,8 @@ int main(int argc, char **argv) {
     std::filesystem::create_directories(video_path);
   }
 
-  enable_torch_determinism(42);
+  if (config.deterministic)
+    enable_torch_determinism(42);
 
   TensorBoardLogger logger(logger_path);
   Network network(config.hidden_size, config.action_size);
@@ -396,7 +399,7 @@ int main(int argc, char **argv) {
 
   at::cuda::CUDAGraph graph;
   network->train();
-  if (USE_CUDA_GRAPH) {
+  if (config.cuda_graph) {
     auto hp = prepare_hyperparameters(config);
     ai::ppo::train::capture_train_cuda_graph(graph, network, optimizer, metrics,
                                              indices, batch, config.num_epochs,
@@ -429,7 +432,7 @@ int main(int argc, char **argv) {
       auto b = prepare_batch(result.batch);
       batch.copy_(b);
     }
-    if (USE_CUDA_GRAPH) {
+    if (config.cuda_graph) {
       ai::ppo::train::train_cuda_graph(graph);
     } else {
       auto hp = prepare_hyperparameters(config);

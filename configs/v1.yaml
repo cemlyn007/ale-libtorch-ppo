@@ -15,9 +15,10 @@ gae_discount: 0.99
 gae_lambda: 0.95
 max_gradient_norm: 0.5
 num_rollouts: 1000000
-log_episode_frequency: 10
 num_workers: 32
 worker_batch_size: 8
 frame_skip: 4
 # Breakout max possible score.
 max_return: 864
+cuda_graph: false
+deterministic: true

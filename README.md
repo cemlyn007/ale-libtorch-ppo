@@ -29,7 +29,7 @@ To run the project, follow these steps:
 
 5. Train the agent using Bazel:
    ```shell
-   bazel run //src/bin:train --compilation_mode=opt -- $(pwd)/roms/breakout.bin $(pwd)/logs/train $(pwd)/video/train train $(pwd)/configs/v0.yaml
+   bazel run //src/bin:train --compilation_mode=opt -- $(pwd)/roms/breakout.bin $(pwd)/logs/train $(pwd)/videos/train train $(pwd)/configs/v0.yaml
    ```
    Or alternatively, with VS Code, you can run the tasks. The command line arguments do the following:
    1. Specify which ROM to use.

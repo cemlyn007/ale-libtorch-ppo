@@ -65,35 +65,8 @@ Rollout::Rollout(
 
   std::vector<int64_t> observation_shape;
   for (size_t i = 0; i < total_environments_; i++) {
-    std::unique_ptr<ai::environment::VirtualEnvironment> environment =
-        std::make_unique<ai::environment::Environment>(rom_path_, max_steps_,
-                                                       grayscale_, i + seed);
-
-    // Atari breakout only has two sets of bricks, once the second set is
-    // cleared, no more bricks will appear.
-    if (max_return > 0.0f)
-      environment =
-          std::make_unique<ai::environment::TruncateOnEpisodeReturnEnvironment>(
-              std::move(environment), max_return);
-
-    if (i == 0 && video_path.has_value()) {
-      if (record_observation_)
-        environment =
-            std::make_unique<ai::environment::EpisodeObservationRecorder>(
-                std::move(environment), video_path.value(), grayscale_);
-      else
-        environment = std::make_unique<ai::environment::EpisodeRecorder>(
-            std::move(environment), video_path.value(), false);
-    }
-    // TODO: Make this configurable.
-    environment = std::make_unique<ai::environment::NoopResetEnvironment>(
-        std::move(environment), 30, seed + i);
-    environment = std::make_unique<ai::environment::MaxAndSkipEnvironment>(
-        std::move(environment), frame_skip);
-    environment =
-        std::make_unique<ai::environment::EpisodeLife>(std::move(environment));
-    environment =
-        std::make_unique<ai::environment::FireReset>(std::move(environment));
+    auto environment =
+        create_environment(i, seed, frame_skip, max_return, video_path);
     environments_.emplace_back(std::move(environment));
     auto screen = environments_.back()->get_interface().getScreen();
     if (grayscale_) {
@@ -132,6 +105,42 @@ Rollout::Rollout(
   for (size_t i = 0; i < num_workers; ++i) {
     workers_.emplace_back(&Rollout::worker, this);
   }
+}
+
+std::unique_ptr<ai::environment::VirtualEnvironment>
+Rollout::create_environment(
+    size_t i, size_t seed, size_t frame_skip, ale::reward_t max_return,
+    const std::optional<std::filesystem::path> &video_path) const {
+  std::unique_ptr<ai::environment::VirtualEnvironment> environment =
+      std::make_unique<ai::environment::Environment>(rom_path_, max_steps_,
+                                                     grayscale_, i + seed);
+
+  // Atari breakout only has two sets of bricks, once the second set is
+  // cleared, no more bricks will appear.
+  if (max_return > 0.0f)
+    environment =
+        std::make_unique<ai::environment::TruncateOnEpisodeReturnEnvironment>(
+            std::move(environment), max_return);
+
+  if (i == 0 && video_path.has_value()) {
+    if (record_observation_)
+      environment =
+          std::make_unique<ai::environment::EpisodeObservationRecorder>(
+              std::move(environment), video_path.value(), grayscale_);
+    else
+      environment = std::make_unique<ai::environment::EpisodeRecorder>(
+          std::move(environment), video_path.value(), false);
+  }
+  // TODO: Make this configurable.
+  environment = std::make_unique<ai::environment::NoopResetEnvironment>(
+      std::move(environment), 30, seed + i);
+  environment = std::make_unique<ai::environment::MaxAndSkipEnvironment>(
+      std::move(environment), frame_skip);
+  environment =
+      std::make_unique<ai::environment::EpisodeLife>(std::move(environment));
+  environment =
+      std::make_unique<ai::environment::FireReset>(std::move(environment));
+  return environment;
 }
 
 Rollout::~Rollout() {

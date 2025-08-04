@@ -60,6 +60,9 @@ public:
   float gae_lambda_ = 0.95f;
 
 private:
+  std::unique_ptr<ai::environment::VirtualEnvironment> create_environment(
+      size_t i, size_t seed, size_t frame_skip, ale::reward_t max_return,
+      const std::optional<std::filesystem::path> &video_path) const;
   StepResult step(const StepInput &);
   std::vector<StepResult> step_all(const std::vector<StepInput> &inputs);
   void worker();

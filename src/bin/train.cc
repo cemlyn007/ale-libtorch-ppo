@@ -58,6 +58,7 @@ struct Config {
   // It is faster to record using the observation.
   // However the observation may be in grayscale.
   bool record_observation;
+  bool record_video;
   bool cuda_graph;
   bool deterministic;
 };
@@ -99,6 +100,7 @@ get_parameters(const Config &config) {
   hparams["frame_skip"] = get_value(config.frame_skip);
   hparams["max_return"] = get_value(config.max_return);
   hparams["record_observation"] = get_bool_value(config.record_observation);
+  hparams["record_video"] = get_bool_value(config.record_video);
   hparams["cuda_graph"] = get_bool_value(config.cuda_graph);
   hparams["deterministic"] = get_bool_value(config.deterministic);
   return hparams;
@@ -128,6 +130,7 @@ Config load_config(const std::filesystem::path &path) {
   config.frame_skip = node["frame_skip"].as<size_t>(4);
   config.max_return = node["max_return"].as<float>(-1.0f);
   config.record_observation = node["record_observation"].as<bool>(false);
+  config.record_video = node["record_video"].as<bool>(false);
   config.cuda_graph = node["cuda_graph"].as<bool>(false);
   config.deterministic = node["deterministic"].as<bool>(false);
   return config;
@@ -330,9 +333,12 @@ int main(int argc, char **argv) {
   const auto rom_path = std::filesystem::path(argv[1]);
   const auto logger_path = std::filesystem::path(argv[2]).replace_extension(
       "tfevents." + std::to_string(start_time));
-  const auto video_path = std::filesystem::path(argv[3]);
-  const std::string group_name = argv[4];
   const auto config = load_config(std::filesystem::path(argv[5]));
+  const std::optional<std::filesystem::path> video_path =
+      config.record_video
+          ? std::optional<std::filesystem::path>(std::filesystem::path(argv[3]))
+          : std::nullopt;
+  const std::string group_name = argv[4];
   std::filesystem::path profile_path;
   if (argc == 7) {
     profile_path = std::filesystem::path(argv[6]);
@@ -348,8 +354,8 @@ int main(int argc, char **argv) {
   if (!std::filesystem::exists(logger_path.parent_path())) {
     std::filesystem::create_directories(logger_path.parent_path());
   }
-  if (!std::filesystem::exists(video_path)) {
-    std::filesystem::create_directories(video_path);
+  if (video_path.has_value() && !std::filesystem::exists(video_path.value())) {
+    std::filesystem::create_directories(video_path.value());
   }
 
   if (config.deterministic)

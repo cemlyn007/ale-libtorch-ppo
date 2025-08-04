@@ -21,5 +21,6 @@ frame_skip: 4
 # Breakout max possible score.
 max_return: 864
 record_observation: false
+record_video: true
 cuda_graph: false
 deterministic: true

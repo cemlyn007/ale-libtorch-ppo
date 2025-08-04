@@ -5,7 +5,7 @@
 #include "ai/environment/fire_reset.h"
 #include "ai/environment/max_and_skip.h"
 #include "ai/environment/noop_reset.h"
-#include "ai/environment/reset_on_return.h"
+#include "ai/environment/truncate_on_episode_return.h"
 #include "ai/gae.h"
 #include <cassert>
 
@@ -72,8 +72,9 @@ Rollout::Rollout(
     // Atari breakout only has two sets of bricks, once the second set is
     // cleared, no more bricks will appear.
     if (max_return > 0.0f)
-      environment = std::make_unique<ai::environment::ResetOnReturnEnvironment>(
-          std::move(environment), max_return);
+      environment =
+          std::make_unique<ai::environment::TruncateOnEpisodeReturnEnvironment>(
+              std::move(environment), max_return);
 
     if (i == 0 && video_path.has_value()) {
       if (record_observation_)
@@ -269,6 +270,8 @@ StepResult Rollout::step(const StepInput &input) {
   output.environment_index = input.environment_index;
   std::vector<unsigned char> observation;
   if (input.is_episode_start) {
+    // Always reset the environment when is_episode_start is true
+    // This ensures we reset properly after reaching max score (864)
     observation = environments_[input.environment_index]->reset();
     output.reward = 0.0f;
     output.terminated = false;
@@ -281,6 +284,13 @@ StepResult Rollout::step(const StepInput &input) {
     output.terminated = result.terminated;
     output.truncated = result.truncated;
     output.game_over = result.game_over;
+
+    // If the step resulted in game over (terminated or truncated),
+    // we should immediately force a reset on the next step
+    if (result.terminated || result.truncated || result.game_over) {
+      // The next step will use is_episode_start=true to reset
+      // No need to reset here as it would waste a step
+    }
   }
   std::copy(observation.begin(), observation.end(),
             screen_buffers_[input.environment_index].begin());

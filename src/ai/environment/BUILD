@@ -104,12 +104,12 @@ cc_library(
 )
 
 cc_library(
-    name = "reset_on_return",
+    name = "truncate_on_episode_return",
     srcs = [
-        "reset_on_return.cc",
+        "truncate_on_episode_return.cc",
     ],
     hdrs = [
-        "reset_on_return.h",
+        "truncate_on_episode_return.h",
     ],
     strip_include_prefix = "/src",
     deps = [

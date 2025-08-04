@@ -5,10 +5,10 @@
 
 namespace ai::environment {
 
-class ResetOnReturnEnvironment : public VirtualEnvironment {
+class TruncateOnEpisodeReturnEnvironment : public VirtualEnvironment {
 public:
-  explicit ResetOnReturnEnvironment(std::unique_ptr<VirtualEnvironment> env,
-                                    ale::reward_t max_return);
+  explicit TruncateOnEpisodeReturnEnvironment(
+      std::unique_ptr<VirtualEnvironment> env, ale::reward_t max_return);
   ScreenBuffer reset() override;
   Step step(const ale::Action &action) override;
   ale::ALEInterface &get_interface() override;

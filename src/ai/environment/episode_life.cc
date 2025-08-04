@@ -14,6 +14,10 @@ ScreenBuffer EpisodeLife::reset() {
     auto step_result = env_->step(ale::Action::PLAYER_A_NOOP);
     observation = step_result.observation;
     game_over_ = step_result.game_over;
+    if (step_result.terminated || step_result.truncated) {
+      observation = env_->reset();
+      game_over_ = false;
+    }
   }
   lives_ = env_->get_interface().lives();
   return observation;

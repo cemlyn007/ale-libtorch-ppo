@@ -279,8 +279,6 @@ StepResult Rollout::step(const StepInput &input) {
   output.environment_index = input.environment_index;
   std::vector<unsigned char> observation;
   if (input.is_episode_start) {
-    // Always reset the environment when is_episode_start is true
-    // This ensures we reset properly after reaching max score (864)
     observation = environments_[input.environment_index]->reset();
     output.reward = 0.0f;
     output.terminated = false;
@@ -293,13 +291,6 @@ StepResult Rollout::step(const StepInput &input) {
     output.terminated = result.terminated;
     output.truncated = result.truncated;
     output.game_over = result.game_over;
-
-    // If the step resulted in game over (terminated or truncated),
-    // we should immediately force a reset on the next step
-    if (result.terminated || result.truncated || result.game_over) {
-      // The next step will use is_episode_start=true to reset
-      // No need to reset here as it would waste a step
-    }
   }
   std::copy(observation.begin(), observation.end(),
             screen_buffers_[input.environment_index].begin());

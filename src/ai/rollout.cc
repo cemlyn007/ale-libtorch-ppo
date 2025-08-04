@@ -64,29 +64,33 @@ Rollout::Rollout(
   }
 
   std::vector<int64_t> observation_shape;
-  for (size_t i = 0; i < total_environments_; i++) {
-    auto environment =
-        create_environment(i, seed, frame_skip, max_return, video_path);
-    environments_.emplace_back(std::move(environment));
-    auto screen = environments_.back()->get_interface().getScreen();
-    if (grayscale_) {
-      screen_buffers_.emplace_back(
-          std::vector<unsigned char>(screen.height() * screen.width()));
-      environments_.back()->get_interface().getScreenGrayscale(
-          screen_buffers_.back());
-      observation_shape = {static_cast<int64_t>(screen.height()),
-                           static_cast<int64_t>(screen.width())};
-    } else {
-      screen_buffers_.emplace_back(
-          std::vector<unsigned char>(3 * screen.height() * screen.width()));
-      environments_.back()->get_interface().getScreenRGB(
-          screen_buffers_.back());
-      observation_shape = {3, static_cast<int64_t>(screen.height()),
-                           static_cast<int64_t>(screen.width())};
-    }
-    screen_tensor_blobs_.push_back(torch::from_blob(
-        screen_buffers_.back().data(), observation_shape, torch::kByte));
+  environments_.resize(total_environments_);
+  screen_buffers_.resize(total_environments_);
+  screen_tensor_blobs_.resize(total_environments_);
+  std::vector<std::thread> threads;
+  for (size_t i = 0; i < total_environments_; ++i) {
+    threads.emplace_back([&, i]() {
+      auto environment =
+          create_environment(i, seed, frame_skip, max_return, video_path);
+      auto screen = environment->get_interface().getScreen();
+      if (grayscale_) {
+        screen_buffers_[i] =
+            std::vector<unsigned char>(screen.height() * screen.width());
+        observation_shape = {static_cast<int64_t>(screen.height()),
+                             static_cast<int64_t>(screen.width())};
+      } else {
+        screen_buffers_[i] =
+            std::vector<unsigned char>(3 * screen.height() * screen.width());
+        observation_shape = {3, static_cast<int64_t>(screen.height()),
+                             static_cast<int64_t>(screen.width())};
+      }
+      screen_tensor_blobs_[i] = torch::from_blob(
+          screen_buffers_[i].data(), observation_shape, torch::kByte);
+      environments_[i] = std::move(environment);
+    });
   }
+  for (auto &thread : threads)
+    thread.join();
 
   auto total = static_cast<int64_t>(total_environments_);
   auto frame = static_cast<int64_t>(frame_stack_);

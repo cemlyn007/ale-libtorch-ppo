@@ -204,9 +204,11 @@ RolloutResult Rollout::rollout() {
     for (const auto &result : step_results) {
       int64_t ale_index = result.environment_index;
       if (!is_episode_start_cpu_[ale_index]) {
+        // On the accelerator:
         rewards_[ale_index] = result.reward;
         is_terminated_[ale_index] = result.terminated;
         is_truncated_[ale_index] = result.truncated;
+        // On the CPU:
         game_overs_[ale_index] = result.game_over;
         episode_returns_[ale_index] += result.reward;
         episode_lengths_[ale_index]++;
@@ -229,10 +231,12 @@ RolloutResult Rollout::rollout() {
     for (const auto &result : step_results) {
       int64_t ale_index = result.environment_index;
       if (result.terminated || result.truncated) {
+        // On the accelerator:
         is_episode_start_[ale_index] = true;
-        is_episode_start_cpu_[ale_index] = true;
         is_terminated_[ale_index] = false;
         is_truncated_[ale_index] = false;
+        // On the CPU:
+        is_episode_start_cpu_[ale_index] = true;
         current_episode_++;
         episode_returns.push_back(episode_returns_[ale_index]);
         episode_lengths.push_back(episode_lengths_[ale_index]);
@@ -245,7 +249,9 @@ RolloutResult Rollout::rollout() {
           game_lengths_[ale_index] = 0;
         }
       } else if (is_episode_start_cpu_[ale_index]) {
+        // On the accelerator:
         is_episode_start_[ale_index] = false;
+        // On the CPU:
         is_episode_start_cpu_[ale_index] = false;
       }
     }

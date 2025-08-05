@@ -28,10 +28,6 @@ struct ActionResult {
   torch::Tensor values;
 };
 
-struct StepInput {
-  size_t environment_index;
-};
-
 struct StepResult {
   size_t environment_index;
   float reward;
@@ -61,8 +57,8 @@ private:
   std::unique_ptr<ai::environment::VirtualEnvironment> create_environment(
       size_t i, size_t seed, size_t frame_skip, ale::reward_t max_return,
       const std::optional<std::filesystem::path> &video_path) const;
-  StepResult step(const StepInput &);
-  std::vector<StepResult> step_all(const std::vector<StepInput> &inputs);
+  StepResult step(const size_t environment_index);
+  std::vector<StepResult> step_all();
   void worker();
 
   std::filesystem::path rom_path_;
@@ -97,7 +93,7 @@ private:
   std::atomic<bool> stop_;
 
   std::vector<std::thread> workers_;
-  ai::queue::Queue<StepInput> action_queue_;
+  ai::queue::Queue<size_t> action_queue_;
   ai::queue::Queue<StepResult> step_queue_;
   size_t batch_size_;
   bool grayscale_;

@@ -161,11 +161,11 @@ Rollout::create_environment(
 
 Rollout::~Rollout() {
   stop_ = true;
-  std::vector<StepInput> inputs(total_environments_);
+  std::vector<size_t> inputs(total_environments_);
   action_result_.actions.fill_(ale::Action::RANDOM);
   is_episode_start_cpu_.assign(total_environments_, true);
   for (size_t i = 0; i < total_environments_; ++i)
-    inputs[i] = StepInput{i};
+    inputs[i] = i;
   action_queue_.push(inputs);
   for (auto &worker : workers_)
     if (worker.joinable())
@@ -193,18 +193,14 @@ RolloutResult Rollout::rollout() {
   std::vector<float> game_returns;
   std::vector<size_t> game_lengths;
 
-  std::vector<StepInput> step_inputs(total_environments_);
   for (size_t time_index = 0; time_index < horizon_; time_index++) {
 
     // Action Selection
     action_result_ = action_selector_(observations_);
-    for (size_t ale_index = 0; ale_index < total_environments_; ++ale_index) {
-      step_inputs[ale_index] = StepInput{ale_index};
-    }
 
     // Step all environments with the selected actions.
     size_t total_steps_increment = 0;
-    const auto step_results = step_all(step_inputs);
+    const auto step_results = step_all();
     for (const auto &result : step_results) {
       int64_t ale_index = result.environment_index;
       if (!is_episode_start_cpu_[ale_index]) {
@@ -267,8 +263,11 @@ RolloutResult Rollout::rollout() {
   return {batch, log};
 }
 
-std::vector<StepResult>
-Rollout::step_all(const std::vector<StepInput> &inputs) {
+std::vector<StepResult> Rollout::step_all() {
+  std::vector<size_t> inputs(total_environments_);
+  for (size_t i = 0; i < total_environments_; ++i) {
+    inputs[i] = i;
+  }
   action_queue_.push(inputs);
   return step_queue_.pop(inputs.size());
 }
@@ -283,26 +282,26 @@ void Rollout::worker() {
   }
 }
 
-StepResult Rollout::step(const StepInput &input) {
+StepResult Rollout::step(const size_t environment_index) {
   StepResult output;
-  output.environment_index = input.environment_index;
+  output.environment_index = environment_index;
   std::vector<unsigned char> observation;
-  if (is_episode_start_cpu_[input.environment_index]) {
-    observation = environments_[input.environment_index]->reset();
+  if (is_episode_start_cpu_[environment_index]) {
+    observation = environments_[environment_index]->reset();
     output.reward = 0.0f;
     output.terminated = false;
     output.truncated = false;
     output.game_over = false;
   } else {
-    auto &interface = environments_[input.environment_index]->get_interface();
+    auto &interface = environments_[environment_index]->get_interface();
     auto action_set = interface.getMinimalActionSet();
     size_t action_index =
-        action_result_.actions[input.environment_index].item<int64_t>();
+        action_result_.actions[environment_index].item<int64_t>();
     if (action_index < 0 || action_index >= action_set.size())
       throw std::out_of_range("Action index out of range for environment " +
-                              std::to_string(input.environment_index));
+                              std::to_string(environment_index));
     auto action = action_set[action_index];
-    auto result = environments_[input.environment_index]->step(action);
+    auto result = environments_[environment_index]->step(action);
     observation = result.observation;
     output.reward = result.reward;
     output.terminated = result.terminated;
@@ -310,7 +309,7 @@ StepResult Rollout::step(const StepInput &input) {
     output.game_over = result.game_over;
   }
   std::copy(observation.begin(), observation.end(),
-            screen_buffers_[input.environment_index].begin());
+            screen_buffers_[environment_index].begin());
   return output;
 }
 } // namespace ai::rollout

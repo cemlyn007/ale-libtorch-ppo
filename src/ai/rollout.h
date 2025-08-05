@@ -30,8 +30,6 @@ struct ActionResult {
 
 struct StepInput {
   size_t environment_index;
-  ale::Action action;
-  bool is_episode_start;
 };
 
 struct StepResult {
@@ -83,6 +81,7 @@ private:
   torch::Tensor is_terminated_;
   torch::Tensor is_truncated_;
   torch::Tensor is_episode_start_;
+  std::vector<bool> is_episode_start_cpu_;
   std::vector<bool> game_overs_;
   std::vector<float> episode_returns_;
   std::vector<size_t> episode_lengths_;
@@ -103,6 +102,8 @@ private:
   size_t batch_size_;
   bool grayscale_;
   bool record_observation_;
+
+  ActionResult action_result_;
 };
 
 } // namespace ai::rollout

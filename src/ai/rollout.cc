@@ -63,7 +63,6 @@ Rollout::Rollout(
                                 rom_path_.string());
   }
 
-  std::vector<int64_t> observation_shape;
   environments_.resize(total_environments_);
   screen_buffers_.resize(total_environments_);
   screen_tensor_blobs_.resize(total_environments_);
@@ -73,6 +72,7 @@ Rollout::Rollout(
       auto environment =
           create_environment(i, seed, frame_skip, max_return, video_path);
       auto screen = environment->get_interface().getScreen();
+      std::vector<int64_t> observation_shape;
       if (grayscale_) {
         screen_buffers_[i] =
             std::vector<unsigned char>(screen.height() * screen.width());
@@ -92,6 +92,16 @@ Rollout::Rollout(
   for (auto &thread : threads)
     thread.join();
 
+  auto screen = environments_[0]->get_interface().getScreen();
+  std::vector<int64_t> observation_shape;
+  if (grayscale_) {
+    observation_shape = {static_cast<int64_t>(screen.height()),
+                         static_cast<int64_t>(screen.width())};
+  } else {
+    observation_shape = {3, static_cast<int64_t>(screen.height()),
+                         static_cast<int64_t>(screen.width())};
+  }
+
   auto total = static_cast<int64_t>(total_environments_);
   auto frame = static_cast<int64_t>(frame_stack_);
   auto options = torch::TensorOptions(torch::kFloat32).device(device_);
@@ -104,6 +114,8 @@ Rollout::Rollout(
   is_truncated_ = torch::zeros({total}, options.dtype(torch::kBool));
   is_episode_start_ = torch::ones({total}, options.dtype(torch::kBool));
   rewards_ = torch::zeros({total}, options);
+
+  is_episode_start_cpu_.resize(total_environments_, true);
 
   std::cout << "Creating " << num_workers << " worker threads." << std::endl;
   for (size_t i = 0; i < num_workers; ++i) {
@@ -150,8 +162,10 @@ Rollout::create_environment(
 Rollout::~Rollout() {
   stop_ = true;
   std::vector<StepInput> inputs(total_environments_);
+  action_result_.actions.fill_(ale::Action::RANDOM);
+  is_episode_start_cpu_.assign(total_environments_, true);
   for (size_t i = 0; i < total_environments_; ++i)
-    inputs[i] = StepInput{i, ale::Action::RANDOM, true};
+    inputs[i] = StepInput{i};
   action_queue_.push(inputs);
   for (auto &worker : workers_)
     if (worker.joinable())
@@ -165,7 +179,7 @@ void Rollout::update_observations() {
         observations_.index({torch::indexing::Slice(), frame_index - 1}));
   for (size_t i = 0; i < total_environments_; ++i) {
     const auto &frame = screen_tensor_blobs_[i];
-    if (is_episode_start_[i].item<bool>()) {
+    if (is_episode_start_cpu_[i]) {
       observations_.select(0, i).copy_(frame);
     } else {
       observations_.index_put_({static_cast<int64_t>(i), 0}, frame);
@@ -179,24 +193,13 @@ RolloutResult Rollout::rollout() {
   std::vector<float> game_returns;
   std::vector<size_t> game_lengths;
 
-  ActionResult action_result;
   std::vector<StepInput> step_inputs(total_environments_);
   for (size_t time_index = 0; time_index < horizon_; time_index++) {
 
     // Action Selection
-    action_result = action_selector_(observations_);
-    const auto actions = action_result.actions;
-    const auto is_episode_start = is_episode_start_.to(torch::kCPU);
+    action_result_ = action_selector_(observations_);
     for (size_t ale_index = 0; ale_index < total_environments_; ++ale_index) {
-      auto &interface = environments_[ale_index]->get_interface();
-      auto action_set = interface.getMinimalActionSet();
-      size_t action_index = actions[ale_index].item<int64_t>();
-      if (action_index < 0 || action_index >= action_set.size())
-        throw std::out_of_range("Action index out of range for environment " +
-                                std::to_string(ale_index));
-      auto action = action_set[action_index];
-      bool episode_start = is_episode_start[ale_index].item<bool>();
-      step_inputs[ale_index] = StepInput{ale_index, action, episode_start};
+      step_inputs[ale_index] = StepInput{ale_index};
     }
 
     // Step all environments with the selected actions.
@@ -204,7 +207,7 @@ RolloutResult Rollout::rollout() {
     const auto step_results = step_all(step_inputs);
     for (const auto &result : step_results) {
       int64_t ale_index = result.environment_index;
-      if (!step_inputs[ale_index].is_episode_start) {
+      if (!is_episode_start_cpu_[ale_index]) {
         rewards_[ale_index] = result.reward;
         is_terminated_[ale_index] = result.terminated;
         is_truncated_[ale_index] = result.truncated;
@@ -219,9 +222,9 @@ RolloutResult Rollout::rollout() {
 
     // Add the observations, and the actions that from those observations led
     // to the rewards and terminal state changes.
-    buffer_.add(observations_, action_result.actions, rewards_, is_terminated_,
-                is_truncated_, is_episode_start_, action_result.logits,
-                action_result.values);
+    buffer_.add(observations_, action_result_.actions, rewards_, is_terminated_,
+                is_truncated_, is_episode_start_, action_result_.logits,
+                action_result_.values);
 
     // Get the next observations after taking actions and saving the
     // observations.
@@ -231,6 +234,7 @@ RolloutResult Rollout::rollout() {
       int64_t ale_index = result.environment_index;
       if (result.terminated || result.truncated) {
         is_episode_start_[ale_index] = true;
+        is_episode_start_cpu_[ale_index] = true;
         is_terminated_[ale_index] = false;
         is_truncated_[ale_index] = false;
         current_episode_++;
@@ -244,15 +248,16 @@ RolloutResult Rollout::rollout() {
           game_returns_[ale_index] = 0.0;
           game_lengths_[ale_index] = 0;
         }
-      } else if (step_inputs[ale_index].is_episode_start) {
+      } else if (is_episode_start_cpu_[ale_index]) {
         is_episode_start_[ale_index] = false;
+        is_episode_start_cpu_[ale_index] = false;
       }
     }
     total_steps_ += total_steps_increment;
   }
-  action_result = action_selector_(observations_);
+  action_result_ = action_selector_(observations_);
   const auto batch =
-      buffer_.get(action_result.values, gae_discount_, gae_lambda_);
+      buffer_.get(action_result_.values, gae_discount_, gae_lambda_);
   const Log log{.steps = total_steps_,
                 .episodes = current_episode_,
                 .episode_returns = episode_returns,
@@ -282,14 +287,22 @@ StepResult Rollout::step(const StepInput &input) {
   StepResult output;
   output.environment_index = input.environment_index;
   std::vector<unsigned char> observation;
-  if (input.is_episode_start) {
+  if (is_episode_start_cpu_[input.environment_index]) {
     observation = environments_[input.environment_index]->reset();
     output.reward = 0.0f;
     output.terminated = false;
     output.truncated = false;
     output.game_over = false;
   } else {
-    auto result = environments_[input.environment_index]->step(input.action);
+    auto &interface = environments_[input.environment_index]->get_interface();
+    auto action_set = interface.getMinimalActionSet();
+    size_t action_index =
+        action_result_.actions[input.environment_index].item<int64_t>();
+    if (action_index < 0 || action_index >= action_set.size())
+      throw std::out_of_range("Action index out of range for environment " +
+                              std::to_string(input.environment_index));
+    auto action = action_set[action_index];
+    auto result = environments_[input.environment_index]->step(action);
     observation = result.observation;
     output.reward = result.reward;
     output.terminated = result.terminated;

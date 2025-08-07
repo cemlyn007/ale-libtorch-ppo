@@ -8,7 +8,7 @@ svg_file_path=$tmp_directory/perf.svg
 
 # -fno-omit-frame-pointer is advised from http://www.brendangregg.com/FlameGraphs/cpuflamegraphs.html#Instructions.
 bazel build \
-  --compilation_mode=dbg \
+  --compilation_mode=opt \
   --copt=-fno-omit-frame-pointer \
   --copt=-g \
   --linkopt=-fno-omit-frame-pointer \

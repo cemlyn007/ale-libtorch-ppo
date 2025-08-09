@@ -11,7 +11,6 @@
 #include <torch/torch.h>
 #include <yaml-cpp/yaml.h>
 
-const bool PREPROCESSED_GRAYSCALE = true;
 const bool ANNEAL_ENTROPY_COEFFICIENT = false;
 
 // This is being used for annealing the entropy coefficient
@@ -362,7 +361,7 @@ int main(int argc, char **argv) {
 
   ai::rollout::Rollout rollout(
       rom_path, config.total_environments, config.horizon, config.max_steps,
-      config.frame_stack, PREPROCESSED_GRAYSCALE,
+      config.frame_stack, true,
       [&network, &device, action_size = config.action_size](
           const torch::Tensor &obs) -> ai::rollout::ActionResult {
         network->eval();
@@ -427,12 +426,13 @@ int main(int argc, char **argv) {
     {
       torch::NoGradGuard no_grad;
       result = rollout.rollout();
-      auto b = prepare_batch(result.batch);
-      batch.copy_(b);
     }
     if (config.cuda_graph) {
+      auto b = prepare_batch(result.batch);
+      batch.copy_(b);
       ai::ppo::train::train_cuda_graph(graph);
     } else {
+      batch = prepare_batch(result.batch);
       auto hp = prepare_hyperparameters(config);
       ai::ppo::train::train(network, optimizer, metrics, indices, batch,
                             config.num_epochs, config.num_mini_batches, hp);

@@ -186,13 +186,13 @@ void Rollout::update_observations() {
     observations_.index_put_(
         {torch::indexing::Slice(), frame_index},
         observations_.index({torch::indexing::Slice(), frame_index - 1}));
-  observations_.index_put_({torch::indexing::Slice(), 0},
-                           torch::stack(screen_tensor_blobs_, 0));
   for (size_t i = 0; i < total_environments_; ++i) {
     const auto &frame = screen_tensor_blobs_[i];
     if (is_episode_start_cpu_[i])
-      observations_.select(0, i).copy_(frame);
+      observations_.select(0, i).copy_(frame, true);
   }
+  observations_.index_put_({torch::indexing::Slice(), 0},
+                           torch::stack(screen_tensor_blobs_, 0));
 }
 
 RolloutResult Rollout::rollout() {

@@ -62,6 +62,8 @@ private:
   void worker();
 
   std::filesystem::path rom_path_;
+  size_t height_;
+  size_t width_;
   ai::buffer::Buffer buffer_;
   std::vector<std::vector<unsigned char>> screen_buffers_;
   std::vector<torch::Tensor> screen_tensor_blobs_;

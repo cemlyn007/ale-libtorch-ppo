@@ -1,4 +1,5 @@
 #include "ai/vision.h"
+#include "stb_image_resize2.h"
 #include <array>
 #include <torch/torch.h>
 
@@ -80,6 +81,17 @@ rgb_to_grayscale_frame_stacked_images(const torch::Tensor &images) {
   const auto grayscale_images = torch::matmul(inputs, weights);
   assert(grayscale_images.dim() == 4);
   return grayscale_images;
+}
+
+std::vector<unsigned char>
+resize_grayscale_image(const std::vector<unsigned char> &image, int width,
+                       int height, int new_width, int new_height) {
+  assert(image.size() == static_cast<size_t>(width * height));
+  std::vector<unsigned char> resized_image(new_width * new_height);
+  stbir_resize_uint8_linear(image.data(), width, height, 0,
+                            resized_image.data(), new_width, new_height, 0,
+                            STBIR_1CHANNEL);
+  return resized_image;
 }
 
 } // namespace ai::vision

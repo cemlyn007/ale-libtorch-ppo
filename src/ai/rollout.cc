@@ -5,6 +5,7 @@
 #include "ai/environment/fire_reset.h"
 #include "ai/environment/max_and_skip.h"
 #include "ai/environment/noop_reset.h"
+#include "ai/environment/resize.h"
 #include "ai/environment/truncate_on_episode_return.h"
 #include "ai/gae.h"
 #include <cassert>
@@ -20,15 +21,14 @@ Rollout::Rollout(
     size_t frame_skip, ale::reward_t max_return,
     std::optional<std::filesystem::path> video_path, bool record_observation)
     : gae_discount_(gae_discount), gae_lambda_(gae_lambda), rom_path_(rom_path),
-      buffer_([&] {
+      height_(84), width_(84), buffer_([&] {
         ale::ALEInterface ale;
         ale.loadROM(rom_path);
-        auto screen = ale.getScreen();
         std::vector<size_t> observation_shape;
         if (grayscale)
-          observation_shape = {frame_stack, screen.height(), screen.width()};
+          observation_shape = {frame_stack, height_, width_};
         else
-          observation_shape = {frame_stack, 3, screen.height(), screen.width()};
+          observation_shape = {frame_stack, 3, height_, width_};
         return ai::buffer::Buffer(total_environments, horizon,
                                   observation_shape,
                                   ale.getMinimalActionSet().size(), device);
@@ -69,20 +69,24 @@ Rollout::Rollout(
   std::vector<std::thread> threads;
   for (size_t i = 0; i < total_environments_; ++i) {
     threads.emplace_back([&, i]() {
+#if defined(__linux__)
+      cpu_set_t cpuset;
+      CPU_ZERO(&cpuset);
+      CPU_SET(i % std::thread::hardware_concurrency(), &cpuset);
+      pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t), &cpuset);
+#endif
       auto environment =
           create_environment(i, seed, frame_skip, max_return, video_path);
       auto screen = environment->get_interface().getScreen();
       std::vector<int64_t> observation_shape;
       if (grayscale_) {
-        screen_buffers_[i] =
-            std::vector<unsigned char>(screen.height() * screen.width());
-        observation_shape = {static_cast<int64_t>(screen.height()),
-                             static_cast<int64_t>(screen.width())};
+        screen_buffers_[i] = std::vector<unsigned char>(height_ * width_);
+        observation_shape = {static_cast<int64_t>(height_),
+                             static_cast<int64_t>(width_)};
       } else {
-        screen_buffers_[i] =
-            std::vector<unsigned char>(3 * screen.height() * screen.width());
-        observation_shape = {3, static_cast<int64_t>(screen.height()),
-                             static_cast<int64_t>(screen.width())};
+        screen_buffers_[i] = std::vector<unsigned char>(3 * height_ * width_);
+        observation_shape = {3, static_cast<int64_t>(height_),
+                             static_cast<int64_t>(width_)};
       }
       screen_tensor_blobs_[i] = torch::from_blob(
           screen_buffers_[i].data(), observation_shape, torch::kByte);
@@ -95,11 +99,11 @@ Rollout::Rollout(
   auto screen = environments_[0]->get_interface().getScreen();
   std::vector<int64_t> observation_shape;
   if (grayscale_) {
-    observation_shape = {static_cast<int64_t>(screen.height()),
-                         static_cast<int64_t>(screen.width())};
+    observation_shape = {static_cast<int64_t>(height_),
+                         static_cast<int64_t>(width_)};
   } else {
-    observation_shape = {3, static_cast<int64_t>(screen.height()),
-                         static_cast<int64_t>(screen.width())};
+    observation_shape = {3, static_cast<int64_t>(height_),
+                         static_cast<int64_t>(width_)};
   }
 
   auto total = static_cast<int64_t>(total_environments_);
@@ -138,11 +142,15 @@ Rollout::create_environment(
         std::make_unique<ai::environment::TruncateOnEpisodeReturnEnvironment>(
             std::move(environment), max_return);
 
+  environment = std::make_unique<ai::environment::ResizeEnvironment>(
+      std::move(environment), height_, width_);
+
   if (i == 0 && video_path.has_value()) {
     if (record_observation_)
       environment =
           std::make_unique<ai::environment::EpisodeObservationRecorder>(
-              std::move(environment), video_path.value(), grayscale_);
+              std::move(environment), video_path.value(), grayscale_ ? 1 : 3,
+              height_, width_);
     else
       environment = std::make_unique<ai::environment::EpisodeRecorder>(
           std::move(environment), video_path.value(), false);

@@ -1,6 +1,7 @@
 #pragma once
 #include <ale/ale_interface.hpp>
 #include <filesystem>
+#include <vector>
 
 namespace ai::environment {
 

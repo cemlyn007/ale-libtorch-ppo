@@ -4,12 +4,10 @@ namespace ai::environment {
 
 EpisodeObservationRecorder::EpisodeObservationRecorder(
     std::unique_ptr<VirtualEnvironment> env,
-    const std::filesystem::path &video_path, bool grayscale)
-    : episode_index_(0), env_(std::move(env)), video_recorder_([&]() {
-        auto screen = env_->get_interface().getScreen();
-        return ai::video_recorder::VideoRecorder(
-            video_path, grayscale ? 1 : 3, screen.width(), screen.height(), 30);
-      }()) {}
+    const std::filesystem::path &video_path, size_t channels, size_t height,
+    size_t width)
+    : episode_index_(0), env_(std::move(env)),
+      video_recorder_(video_path, channels, width, height, 30) {}
 
 ScreenBuffer EpisodeObservationRecorder::reset() {
   ScreenBuffer observation = env_->reset();

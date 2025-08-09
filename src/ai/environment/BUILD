@@ -117,3 +117,18 @@ cc_library(
         "@arcade_learning_environment//:ale",
     ],
 )
+
+cc_library(
+    name = "resize",
+    srcs = [
+        "resize.cc",
+    ],
+    hdrs = [
+        "resize.h",
+    ],
+    strip_include_prefix = "/src",
+    deps = [
+        ":environment",
+        "//src/ai:vision",
+    ],
+)

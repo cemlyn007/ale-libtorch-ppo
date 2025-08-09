@@ -258,14 +258,6 @@ struct NetworkImpl : torch::nn::Module {
       torch::NoGradGuard no_grad;
       if (x.device().is_cuda())
         x = x.to(torch::kFloat32);
-      if (PREPROCESSED_GRAYSCALE) {
-        x = ai::vision::resize_frame_stacked_grayscale_images(x);
-      } else {
-        // TODO: Investigate why the performance is worse compared to
-        //  preprocessed grayscale.
-        x = ai::vision::rgb_to_grayscale_frame_stacked_images(x);
-        x = ai::vision::resize_frame_stacked_grayscale_images(x);
-      }
       x.divide_(255.0);
     }
     x = sequential->forward(x);
@@ -386,7 +378,7 @@ int main(int argc, char **argv) {
       },
       config.gae_discount, config.gae_lambda, device, 0, config.num_workers,
       config.worker_batch_size, config.frame_skip, config.max_return,
-      video_path);
+      video_path, config.record_observation);
   torch::Tensor indices =
       torch::empty(config.mini_batch_size * config.num_mini_batches,
                    torch::TensorOptions().dtype(torch::kLong).device(device));

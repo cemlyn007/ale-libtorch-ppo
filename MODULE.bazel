@@ -35,6 +35,8 @@ git_override(
     remote = "https://github.com/cemlyn007/tensorboard_logger.git",
 )
 
+bazel_dep(name = "stb", version = "0.0.0-20241109-5c20573")
+
 libtorch_extension = use_extension("//third_party:libtorch.bzl", "libtorch_configure_extension")
 libtorch_extension.configure(
     version = "2.4.1",  # Specify your desired version here

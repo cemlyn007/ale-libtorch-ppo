@@ -89,7 +89,8 @@ Rollout::Rollout(
                              static_cast<int64_t>(width_)};
       }
       screen_tensor_blobs_[i] = torch::from_blob(
-          screen_buffers_[i].data(), observation_shape, torch::kByte);
+          screen_buffers_[i].data(), observation_shape,
+          torch::TensorOptions(torch::kByte).pinned_memory(true));
       environments_[i] = std::move(environment);
     });
   }
@@ -185,13 +186,12 @@ void Rollout::update_observations() {
     observations_.index_put_(
         {torch::indexing::Slice(), frame_index},
         observations_.index({torch::indexing::Slice(), frame_index - 1}));
+  observations_.index_put_({torch::indexing::Slice(), 0},
+                           torch::stack(screen_tensor_blobs_, 0));
   for (size_t i = 0; i < total_environments_; ++i) {
     const auto &frame = screen_tensor_blobs_[i];
-    if (is_episode_start_cpu_[i]) {
+    if (is_episode_start_cpu_[i])
       observations_.select(0, i).copy_(frame);
-    } else {
-      observations_.index_put_({static_cast<int64_t>(i), 0}, frame);
-    }
   }
 }
 
@@ -322,8 +322,8 @@ StepResult Rollout::step(const size_t environment_index) {
     output.truncated = result.truncated;
     output.game_over = result.game_over;
   }
-  std::copy(observation.begin(), observation.end(),
-            screen_buffers_[environment_index].begin());
+  std::memcpy(screen_buffers_[environment_index].data(), observation.data(),
+              observation.size());
   return output;
 }
 } // namespace ai::rollout

@@ -42,8 +42,7 @@ Step Environment::step(const ale::Action &action) {
 ale::ALEInterface &Environment::get_interface() { return ale_; }
 
 ScreenBuffer Environment::get_observation() {
-  ScreenBuffer observation;
-  observation.resize(size_);
+  ScreenBuffer observation(size_);
   if (grayscale_)
     ale_.getScreenGrayscale(observation);
   else

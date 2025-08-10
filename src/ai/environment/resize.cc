@@ -1,4 +1,4 @@
-#include "resize.h"
+#include "ai/environment/resize.h"
 #include "ai/vision.h"
 #include <stdexcept>
 

@@ -31,11 +31,15 @@ ScreenBuffer Environment::reset() {
 
 Step Environment::step(const ale::Action &action) {
   ale::reward_t reward = ale_.act(action);
-  bool game_over = ale_.game_over(false);
+  bool terminated = ale_.game_over(false);
+  bool truncated = ale_.game_truncated() && !terminated;
+  // If we have exceeded our max frames, we consider the game to be over as
+  // well.
+  bool game_over = terminated || truncated;
   return {.observation = get_observation(),
           .reward = reward,
-          .terminated = game_over,
-          .truncated = ale_.game_truncated(),
+          .terminated = terminated,
+          .truncated = truncated,
           .game_over = game_over};
 }
 

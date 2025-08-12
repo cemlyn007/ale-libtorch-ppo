@@ -4,6 +4,19 @@ googletest_copts = [
 ]
 
 cc_test(
+    name = "environment_test",
+    srcs = ["environment_test.cc"],
+    copts = googletest_copts,
+    data = [
+        "//:roms",
+    ],
+    deps = [
+        "//src/ai/environment",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
     name = "vision-test",
     srcs = ["vision-test.cc"],
     copts = googletest_copts,

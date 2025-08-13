@@ -2,7 +2,7 @@ total_environments: 8
 hidden_size: 32
 action_size: 4
 horizon: 32
-max_steps: 108000
+max_steps: 64800
 frame_stack: 4
 learning_rate: 2.5e-4
 clip_param: 0.2

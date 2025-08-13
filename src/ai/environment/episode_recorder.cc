@@ -18,7 +18,7 @@ EpisodeRecorder::EpisodeRecorder(std::unique_ptr<VirtualEnvironment> env,
       video_recorder_([&]() {
         auto screen = env_->get_interface().getScreen();
         return ai::video_recorder::VideoRecorder(
-            video_path, grayscale ? 1 : 3, screen.width(), screen.height(), 30);
+            video_path, grayscale ? 1 : 3, screen.width(), screen.height(), 60);
       }()) {}
 
 ScreenBuffer EpisodeRecorder::reset() {

@@ -7,7 +7,7 @@ EpisodeObservationRecorder::EpisodeObservationRecorder(
     const std::filesystem::path &video_path, size_t channels, size_t height,
     size_t width)
     : episode_index_(0), env_(std::move(env)),
-      video_recorder_(video_path, channels, width, height, 30) {}
+      video_recorder_(video_path, channels, width, height, 60) {}
 
 ScreenBuffer EpisodeObservationRecorder::reset() {
   ScreenBuffer observation = env_->reset();

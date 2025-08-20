@@ -46,12 +46,12 @@ Evaluated using the following hardware:
 * NVIDIA GeForce RTX™ 4090
 
 ### V0 Config
-<p align="center"><img width="400" alt="TensorBoard showing PPO achieving score of 400 on Breakout within 10 million agent steps." src="https://github.com/user-attachments/assets/2b83c03f-95a5-4185-bbb3-e84a2848012c" /></p>
-Achieved 10 million agent steps in 38 minutes and 40 seconds, using the v0 config, with an average steps per second of ~4310 with video recording enabled as well.
+<p align="center"><img width="400" alt="TensorBoard showing PPO achieving score of 400 on Breakout within 10 million agent steps." src="https://github.com/user-attachments/assets/e1b62320-87e8-4ea9-9dd7-dbed2d0dfe98" /></p>
+Achieved 10 million agent steps in 37 minutes and 39 seconds, using the v0 config, with an average steps per second of ~4426 with video recording enabled as well.
 
 ### V1 Config
-<p align="center"><img width="400" alt="TensorBoard showing PPO achieving the maximum score on Breakout of 864." src="https://github.com/user-attachments/assets/01a93c11-a96a-4975-b3f3-4743591b8a4a" /></p>
-Achieved an average of ~14,326 steps per second, with video recording enabled, with hardware still not fully utilised.
+<p align="center"><img width="400" alt="TensorBoard showing PPO achieving the maximum score on Breakout of 864." src="https://github.com/user-attachments/assets/d1bcec5b-20a2-49f6-ad9a-387f81950cff" /></p>
+Achieved an average of ~26,289 steps per second, with video recording enabled, with hardware still not fully utilised.
 
 ## Profiling
 There are three views for profiling this application, using `./scripts/flamegraph.sh`, running the application with a 6th command line argument which specifies where to save the Perfetto profile, lastly you can use nsys to profile the application. The flamegraph script will generate a flamegraph of the application, which can be viewed in a web browser. The Perfetto profile can be opened in the Perfetto UI, and NVIDIA Nsight Systems UI can also be used for profiling if you hook up the path to the `train` binary.

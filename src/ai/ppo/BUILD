@@ -27,7 +27,9 @@ cc_library(
     strip_include_prefix = "/src",
     deps = [
         ":losses",
-        "@cuda//:cuda_headers",
         "@libtorch//:torch",
-    ],
+    ] + select({
+        "@platforms//os:linux": ["@cuda//:cuda_headers"],
+        "//conditions:default": [],
+    }),
 )

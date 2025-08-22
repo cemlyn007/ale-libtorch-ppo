@@ -74,8 +74,6 @@ private:
   size_t max_steps_;
   size_t current_episode_ = 0;
   size_t total_steps_ = 0;
-  float current_episode_return_ = 0.0f;
-  size_t current_episode_length_ = 0;
   torch::Tensor is_terminated_;
   torch::Tensor is_truncated_;
   torch::Tensor is_episode_start_;

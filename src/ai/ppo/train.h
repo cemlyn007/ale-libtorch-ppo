@@ -1,8 +1,11 @@
 #include "ai/ppo/losses.h"
+#include <torch/torch.h>
+
+#ifdef __linux__
 #include <ATen/cuda/CUDAEvent.h>
 #include <ATen/cuda/CUDAGraph.h>
 #include <c10/cuda/CUDAStream.h>
-#include <torch/torch.h>
+#endif
 
 namespace ai::ppo::train {
 
@@ -153,6 +156,7 @@ void train(Network &network, torch::optim::Optimizer &optimizer,
   }
 }
 
+#ifdef __linux__
 void stream_sync(at::cuda::CUDAStream &dependency,
                  at::cuda::CUDAStream &dependent);
 
@@ -191,5 +195,6 @@ void capture_train_cuda_graph(at::cuda::CUDAGraph &graph, Network &network,
 }
 
 void train_cuda_graph(at::cuda::CUDAGraph &graph);
+#endif
 
 } // namespace ai::ppo::train

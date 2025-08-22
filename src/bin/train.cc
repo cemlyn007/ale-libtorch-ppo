@@ -255,8 +255,7 @@ struct NetworkImpl : torch::nn::Module {
   OutputType forward(torch::Tensor x) {
     {
       torch::NoGradGuard no_grad;
-      if (x.device().is_cuda())
-        x = x.to(torch::kFloat32);
+      x = x.to(torch::kFloat32);
       x.divide_(255.0);
     }
     x = sequential->forward(x);
@@ -341,6 +340,9 @@ int main(int argc, char **argv) {
   } else {
     std::cout << "CUDA is not available! Training on CPU." << std::endl;
   }
+#ifdef __APPLE__
+  device = torch::Device(torch::kMPS);
+#endif
 
   if (!std::filesystem::exists(logger_path.parent_path())) {
     std::filesystem::create_directories(logger_path.parent_path());
@@ -394,6 +396,7 @@ int main(int argc, char **argv) {
   ai::ppo::train::Batch batch = prepare_batch(b);
   ai::rollout::RolloutResult result;
 
+#ifdef __linux__
   at::cuda::CUDAGraph graph;
   network->train();
   if (config.cuda_graph) {
@@ -402,6 +405,7 @@ int main(int argc, char **argv) {
                                              indices, batch, config.num_epochs,
                                              config.num_mini_batches, hp, 10);
   }
+#endif
   if (!profile_path.empty()) {
     torch::autograd::profiler::ProfilerConfig profiler_config =
         torch::autograd::profiler::ProfilerConfig(
@@ -428,9 +432,15 @@ int main(int argc, char **argv) {
       result = rollout.rollout();
     }
     if (config.cuda_graph) {
+#ifdef __linux__
       auto b = prepare_batch(result.batch);
       batch.copy_(b);
       ai::ppo::train::train_cuda_graph(graph);
+#else
+      TORCH_CHECK(false, "cuda_graph is only supported on Linux (__linux__ not "
+                         "defined). Set cuda_graph=false or run on Linux.");
+#endif
+
     } else {
       batch = prepare_batch(result.batch);
       auto hp = prepare_hyperparameters(config);

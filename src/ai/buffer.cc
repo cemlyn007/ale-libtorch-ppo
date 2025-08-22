@@ -15,8 +15,8 @@ Buffer::Buffer(size_t total_environments, size_t capacity,
   buffer_observation_shape.insert(buffer_observation_shape.end(),
                                   observation_shape_.begin(),
                                   observation_shape_.end());
-  long total_environments_long = static_cast<long>(total_environments_);
-  long capacity_long = static_cast<long>(capacity_);
+  int64_t total_environments_long = static_cast<int64_t>(total_environments_);
+  int64_t capacity_long = static_cast<int64_t>(capacity_);
 
   auto options = torch::TensorOptions().device(device_);
   auto float_options = options.dtype(torch::kFloat32);

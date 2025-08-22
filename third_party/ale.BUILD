@@ -23,6 +23,8 @@ cmake(
             "-Wno-error=sign-compare",
         ],
         "@platforms//os:macos": [
+            "-Wno-error=unused-but-set-variable",
+            "-Wno-error=unused-variable",
             "-Wno-error=unused-private-field",
             "-Wno-inconsistent-missing-override",
         ],

@@ -15,7 +15,6 @@ public:
 
 private:
   std::unique_ptr<VirtualEnvironment> env_;
-  int max_noops_;
   std::mt19937 random_generator_;
   std::uniform_int_distribution<size_t> distribution_;
 };

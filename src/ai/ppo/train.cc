@@ -1,8 +1,11 @@
 #include "ai/ppo/train.h"
+#include <torch/torch.h>
+
+#ifdef __linux__
 #include <ATen/cuda/CUDAEvent.h>
 #include <ATen/cuda/CUDAGraph.h>
 #include <c10/cuda/CUDAStream.h>
-#include <torch/torch.h>
+#endif
 
 namespace ai::ppo::train {
 
@@ -42,6 +45,7 @@ torch::Tensor clip_grad_norm_(const std::vector<torch::Tensor> &parameters,
   return total_norm_tensor;
 }
 
+#ifdef __linux__
 void stream_sync(at::cuda::CUDAStream &dependency,
                  at::cuda::CUDAStream &dependent) {
   at::cuda::CUDAEvent cuda_ev;
@@ -50,5 +54,6 @@ void stream_sync(at::cuda::CUDAStream &dependency,
 }
 
 void train_cuda_graph(at::cuda::CUDAGraph &graph) { graph.replay(); }
+#endif
 
 } // namespace ai::ppo::train

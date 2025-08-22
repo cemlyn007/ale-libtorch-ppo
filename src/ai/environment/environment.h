@@ -19,6 +19,7 @@ struct Step {
 
 class VirtualEnvironment {
 public:
+  virtual ~VirtualEnvironment() = default;
   virtual ScreenBuffer reset() = 0;
   virtual Step step(const ale::Action &action) = 0;
   virtual ale::ALEInterface &get_interface() = 0;

@@ -1,20 +1,14 @@
 # Build options:
-# Compile as C++20 (the project uses concepts/requires). In Bazel 9
-# --action_env=BAZEL_CXXOPTS no longer reaches the cc toolchain repo rule, so the
-# toolchain would fall back to its -std=c++17 default; set the standard explicitly
-# for both the target and exec (host) configurations instead.
+# Bazel 9 stopped forwarding --action_env=BAZEL_CXXOPTS to the cc toolchain, so
+# set the C++ standard explicitly for the target and host configs.
 build --cxxopt='-std=c++20'
 build --host_cxxopt='-std=c++20'
-# GCC 15 defaults C to C23, where `bool`/`true`/`false` are keywords. The old
-# glib bundled in rules_foreign_cc's pkg-config tool declares a member named
-# `bool`, so build exec-config C sources (from which rules_foreign_cc derives
-# CFLAGS) as gnu17 instead.
+# rules_foreign_cc's bundled pkg-config glib won't compile under GCC 15's C23
+# default (member named `bool`); pin its host C compiles to gnu17.
 build --host_conlyopt='-std=gnu17'
 build --cxxopt='-Wall'
 build --cxxopt='-Werror'
-# Don't hold third-party code to our -Werror policy. e.g. protobuf 33.4 trips
-# -Werror=deprecated-declarations on its own internal use of a deprecated
-# constructor. Keep -Werror for our first-party sources only.
+# Don't hold third-party code to our -Werror (e.g. protobuf 33.4's own deprecated-API use).
 build --per_file_copt=external/.*@-Wno-error
 
 # Debug build specific options:

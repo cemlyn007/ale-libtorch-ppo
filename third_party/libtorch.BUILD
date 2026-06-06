@@ -4,32 +4,17 @@ package(
     default_visibility = ["//visibility:public"],
 )
 
-# libtorch is a prebuilt distribution whose shared libraries are linked with
-# RPATH=$ORIGIN and form one connected dependency web: libtorch_cuda.so needs
-# libtorch_cpu.so, which needs libc10.so and libgomp, and the CUDA libraries
-# (libcudart, libcublas, cuDNN, NVTX, ...) sit alongside them. Because
-# DT_RUNPATH is NOT transitive, every one of these libraries can only find its
-# siblings in its OWN directory -- so they must all live together at runtime.
+# libtorch's prebuilt shared libraries are linked with RPATH=$ORIGIN and find
+# each other (and the vendored CUDA/OpenMP libs) by sibling lookup. Since RPATH
+# isn't transitive, they must all share one runtime directory -- which Bazel
+# only guarantees when they're srcs of a single target. So every loadable lib
+# lives in this one cc_library; splitting into cc_imports or a data filegroup
+# would scatter them and break $ORIGIN resolution.
 #
-# Bazel co-locates precompiled shared libraries in a single _solib directory
-# only when they belong to the SAME target's srcs. Splitting them across
-# separate cc_import targets (one _solib dir each) or a data filegroup (a
-# separate runfiles dir) breaks $ORIGIN resolution. We therefore keep every
-# loadable libtorch library in one cc_library.
-#
-# We deliberately drop:
-#   * the static archives (*.a) -- not needed by a shared-library app,
-#   * libtorch_python.so          -- the Python bindings, and
-#   * lib*_test.so                -- libtorch's bundled unit-test backends,
-# none of which an application should link.
-#
-# The vendored CUDA/OpenMP libraries use auditwheel-hashed filenames whose
-# DT_SONAME is canonical (libcudart-<hash>.so.12 has soname libcudart.so.12).
-# Linking them makes our binary record a DT_NEEDED on the canonical soname; the
-# repository rule (third_party/libtorch.bzl) recreates the canonical
-# soname -> hashed-file symlinks so those entries resolve at runtime, exactly as
-# a normal CUDA install would provide them. The glob picks up both the hashed
-# files (which libtorch's own libraries reference) and the symlinks.
+# The glob excludes what an app shouldn't link (static archives, the Python
+# bindings, the bundled test backends). The vendored libs have auditwheel-hashed
+# filenames but canonical sonames; libtorch.bzl recreates the canonical-soname
+# symlinks so our DT_NEEDED entries resolve.
 
 cc_library(
     name = "torch",

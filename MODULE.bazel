@@ -31,9 +31,8 @@ bazel_dep(name = "platforms", version = "1.0.0")
 bazel_dep(name = "tensorboard_logger")
 git_override(
     module_name = "tensorboard_logger",
-    # This commit loads the proto/cc rules explicitly (Bazel 9 / rules_cc 0.2.x
-    # removed the native proto_library, cc_proto_library, cc_library and cc_test
-    # rules) and declares its own rules_cc dep, so no patch is needed here.
+    # Bazel 9-compatible: loads proto/cc rules explicitly and declares its own
+    # rules_cc dep, so the old patch is no longer needed.
     commit = "50889bf5c6502828a50a5a25edd2ca0b72f6f4cc",
     remote = "https://github.com/cemlyn007/tensorboard_logger.git",
 )
@@ -51,30 +50,26 @@ use_repo(libtorch_extension, "libtorch")
 bazel_dep(name = "hedron_compile_commands", dev_dependency = True)
 git_override(
     module_name = "hedron_compile_commands",
-    # The helly25 fork loads py_binary / cc_binary from @rules_python / @rules_cc
-    # (Bazel 9 removed the native rules) and, in refresh.template.py, returns
-    # sourceless compile actions (e.g. Bazel's -xc++-header parse_headers actions)
-    # as a dropped action instead of tripping `assert source_file_candidates`.
-    # So neither an autoload workaround nor our refresh patch is needed here.
+    # Bazel 9-compatible fork: loads its rules from @rules_python/@rules_cc and
+    # handles sourceless (parse_headers) compile actions, replacing our old patch.
     remote = "https://github.com/helly25/bazel-compile-commands-extractor.git",
     commit = "26a1ba52bd76aa3d95fa7278a9696d51f7946612",
 )
 
-# yaml-cpp 0.9.0 loads its rules via @rules_cc and includes <cstdint> in
-# emitterutils.cpp, so neither the autoload workaround nor our force-include
-# patch is needed anymore.
+# 0.9.0 loads its rules via @rules_cc and includes <cstdint> itself, dropping
+# the autoload workaround and force-include patch.
 bazel_dep(name = "yaml-cpp", version = "0.9.0")
 
-# rules_cuda 0.3.0 loads CcInfo from @rules_cc//cc/common:cc_info.bzl, required
-# for compatibility with rules_cc 0.2.x (the global CcInfo symbol was removed).
+# 0.3.0 is the first release compatible with rules_cc 0.2.x (gets CcInfo from
+# @rules_cc rather than the removed global symbol).
 bazel_dep(name = "rules_cuda", version = "0.3.0")
 
 cuda = use_extension("@rules_cuda//cuda:extensions.bzl", "toolchain")
 
-# Use a hermetic, downloadable CUDA toolkit instead of a local install. The
-# version matches the CUDA build of libtorch (cu124). Only the components needed
-# to compile against the CUDA headers are fetched; cudart's headers transitively
-# require the nvcc and cccl headers.
+# Hermetic CUDA toolkit matching libtorch's cu124 build. Compile-time ONLY: it
+# supplies the CUDA headers reachable from train.h. Don't add these as link or
+# runtime deps -- libtorch bundles its own CUDA runtime (see libtorch.bzl), and
+# a second copy would clash.
 cuda.redist_json(
     name = "cuda_redist",
     components = [
@@ -87,17 +82,6 @@ cuda.redist_json(
         "nvrtc",
         "nvtx",
     ],
-    # This redist is COMPILE-TIME ONLY: it provides the CUDA headers that
-    # libtorch's ATen/cuda/CUDAContextLight.h (reachable from train.h) pulls in
-    # -- cublas_v2.h, cublasLt.h, cusolverDn.h, cusparse.h, plus the cudart,
-    # nvcc and cccl headers they transitively require.
-    #
-    # It is NOT used at runtime. libtorch is self-contained for the CUDA
-    # runtime: it bundles its own CUDA libraries (under auditwheel-hashed
-    # filenames) and third_party/libtorch.bzl recreates the canonical soname
-    # symlinks so the libraries we link resolve them. Do not add these redist
-    # libraries as runtime/link deps -- that would ship a second, redundant copy
-    # of the CUDA runtime alongside libtorch's.
     version = "12.4.1",
 )
 cuda.toolkit(
@@ -106,6 +90,6 @@ cuda.toolkit(
 )
 use_repo(cuda, "cuda")
 
-# 1.17.0.bcr.2 carries the registry-side patches that make googletest build
-# under Bazel 9 / rules_cc 0.2.x, so no git_override is needed.
+# .bcr.2 carries the registry patches for Bazel 9 / rules_cc 0.2.x, dropping the
+# git_override.
 bazel_dep(name = "googletest", version = "1.17.0.bcr.2")

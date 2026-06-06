@@ -56,14 +56,11 @@ def _libtorch_configure_extension_impl(module_ctx):
         strip_prefix = "libtorch",
         url = _URLS.get(version).get(os),
         integrity = _INTEGRITIES.get(version).get(os),
-        # PyTorch vendors its CUDA/OpenMP libraries under auditwheel-hashed
-        # filenames (e.g. libcudart-e6b31d9c.so.12) while their DT_SONAME stays
-        # canonical (libcudart.so.12). libtorch's own libraries reference the
-        # hashed filenames, but anything WE link against these libraries records
-        # a DT_NEEDED on the canonical soname -- a name that otherwise exists
-        # nowhere in the distribution, so the binary fails to load. Recreate the
-        # canonical soname -> hashed-file symlinks the same way a normal CUDA
-        # install (or ldconfig) would, so those DT_NEEDED entries resolve.
+        # The vendored CUDA/OpenMP libs have auditwheel-hashed filenames (e.g.
+        # libcudart-e6b31d9c.so.12) but canonical sonames (libcudart.so.12).
+        # Anything we link records a DT_NEEDED on the canonical name, which
+        # exists nowhere in the distribution -- recreate the soname -> hashed-file
+        # symlinks (as a normal CUDA install would) so those entries resolve.
         patch_cmds = [
             """
             for f in lib/*.so*; do

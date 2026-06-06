@@ -51,17 +51,13 @@ use_repo(libtorch_extension, "libtorch")
 bazel_dep(name = "hedron_compile_commands", dev_dependency = True)
 git_override(
     module_name = "hedron_compile_commands",
-    remote = "https://github.com/hedronvision/bazel-compile-commands-extractor.git",
-    # This commit loads py_binary from @rules_python instead of calling the
-    # native.py_binary that Bazel 9 removed, so the root BUILD loads without any
-    # autoload workaround. (hedron declares its own rules_python dep.)
-    commit = "7fe1eab26d2b8eeb5e1c6a2f38bddb001e3f9696",
-    # Still needed: upstream's refresh.template.py asserts every compile action
-    # has a source file, which fails on Bazel's header-processing (-xc++-header)
-    # actions. The patch returns those as header-only so refresh doesn't crash.
-    patches = [
-        ":third_party/hedron_compile_commands.patch",
-    ],
+    # The helly25 fork loads py_binary / cc_binary from @rules_python / @rules_cc
+    # (Bazel 9 removed the native rules) and, in refresh.template.py, returns
+    # sourceless compile actions (e.g. Bazel's -xc++-header parse_headers actions)
+    # as a dropped action instead of tripping `assert source_file_candidates`.
+    # So neither an autoload workaround nor our refresh patch is needed here.
+    remote = "https://github.com/helly25/bazel-compile-commands-extractor.git",
+    commit = "26a1ba52bd76aa3d95fa7278a9696d51f7946612",
 )
 
 # yaml-cpp 0.9.0 loads its rules via @rules_cc and includes <cstdint> in

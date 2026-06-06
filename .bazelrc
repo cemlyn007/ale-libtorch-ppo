@@ -1,9 +1,3 @@
-# Bazel 9 removed the native cc_* rules; rules_cc 0.2.x serves them via load().
-# Re-enable autoloading for external repositories so legacy BCR module BUILD
-# files (e.g. yaml-cpp) keep working without patching each one. Our own BUILD
-# files load the rules explicitly, so main-repo autoloads stay disabled.
-common --incompatible_autoload_externally=+cc_library,+cc_binary,+cc_test,+cc_import,+cc_shared_library
-
 # Build options:
 # Compile as C++20 (the project uses concepts/requires). In Bazel 9
 # --action_env=BAZEL_CXXOPTS no longer reaches the cc toolchain repo rule, so the

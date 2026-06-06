@@ -6,9 +6,9 @@ module(
     version = "0.1.0",
 )
 
-bazel_dep(name = "protobuf", version = "31.1")
+bazel_dep(name = "protobuf", version = "33.4")
 
-bazel_dep(name = "rules_cc", version = "0.1.1")
+bazel_dep(name = "rules_cc", version = "0.2.19")
 bazel_dep(name = "rules_foreign_cc", version = "0.15.0")
 
 tools = use_extension("@rules_foreign_cc//foreign_cc:extensions.bzl", "tools")
@@ -26,18 +26,16 @@ http_archive(
     integrity = "sha256-K4eK4bf+u0mMerU1F5HG2YONwhS0gl7sDfG1O1i2qqM=",
 )
 
-bazel_dep(name = "platforms", version = "0.0.11")
+bazel_dep(name = "platforms", version = "1.0.0")
 
 bazel_dep(name = "tensorboard_logger")
 git_override(
     module_name = "tensorboard_logger",
-    commit = "f706838d41a19f328d89a1b2c7fdd92545894016",
+    # This commit loads the proto/cc rules explicitly (Bazel 9 / rules_cc 0.2.x
+    # removed the native proto_library, cc_proto_library, cc_library and cc_test
+    # rules) and declares its own rules_cc dep, so no patch is needed here.
+    commit = "50889bf5c6502828a50a5a25edd2ca0b72f6f4cc",
     remote = "https://github.com/cemlyn007/tensorboard_logger.git",
-    # Bazel 9 / rules_cc 0.2.x removed the native proto_library, cc_proto_library,
-    # cc_library and cc_test rules; load them explicitly in the module's BUILD.
-    patches = [
-        ":third_party/tensorboard_logger.patch",
-    ],
 )
 
 bazel_dep(name = "stb", version = "0.0.0-20241109-5c20573")
@@ -66,23 +64,14 @@ git_override(
     ],
 )
 
-bazel_dep(name = "yaml-cpp", version = "0.8.0")
-single_version_override(
-    module_name = "yaml-cpp",
-    # yaml-cpp 0.8.0 omits <cstdint> in src/emitterutils.cpp; force-include it
-    # so the build works with newer GCC that no longer includes it transitively.
-    patch_strip = 1,
-    patches = ["//third_party:yaml-cpp.patch"],
-)
+# yaml-cpp 0.9.0 loads its rules via @rules_cc and includes <cstdint> in
+# emitterutils.cpp, so neither the autoload workaround nor our force-include
+# patch is needed anymore.
+bazel_dep(name = "yaml-cpp", version = "0.9.0")
 
-bazel_dep(name = "rules_cuda")
-git_override(
-    module_name = "rules_cuda",
-    remote = "https://github.com/bazel-contrib/rules_cuda.git",
-    # v0.3.0: loads CcInfo from @rules_cc//cc/common:cc_info.bzl, required for
-    # compatibility with rules_cc 0.2.x (the global CcInfo symbol was removed).
-    commit = "e10b718bc8d37abcb4c18d721806ef8ad74aa324",
-)
+# rules_cuda 0.3.0 loads CcInfo from @rules_cc//cc/common:cc_info.bzl, required
+# for compatibility with rules_cc 0.2.x (the global CcInfo symbol was removed).
+bazel_dep(name = "rules_cuda", version = "0.3.0")
 
 cuda = use_extension("@rules_cuda//cuda:extensions.bzl", "toolchain")
 
@@ -121,9 +110,6 @@ cuda.toolkit(
 )
 use_repo(cuda, "cuda")
 
-bazel_dep(name = "googletest", version = "1.17.0")
-git_override(
-    module_name = "googletest",
-    remote = "https://github.com/google/googletest.git",
-    commit = "35b75a2cba6ef72b7ce2b6b94b05c54ca07df866",
-)
+# 1.17.0.bcr.2 carries the registry-side patches that make googletest build
+# under Bazel 9 / rules_cc 0.2.x, so no git_override is needed.
+bazel_dep(name = "googletest", version = "1.17.0.bcr.2")

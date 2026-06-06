@@ -33,6 +33,11 @@ git_override(
     module_name = "tensorboard_logger",
     commit = "f706838d41a19f328d89a1b2c7fdd92545894016",
     remote = "https://github.com/cemlyn007/tensorboard_logger.git",
+    # Bazel 9 / rules_cc 0.2.x removed the native proto_library, cc_proto_library,
+    # cc_library and cc_test rules; load them explicitly in the module's BUILD.
+    patches = [
+        ":third_party/tensorboard_logger.patch",
+    ],
 )
 
 bazel_dep(name = "stb", version = "0.0.0-20241109-5c20573")
@@ -56,15 +61,54 @@ git_override(
 )
 
 bazel_dep(name = "yaml-cpp", version = "0.8.0")
+single_version_override(
+    module_name = "yaml-cpp",
+    # yaml-cpp 0.8.0 omits <cstdint> in src/emitterutils.cpp; force-include it
+    # so the build works with newer GCC that no longer includes it transitively.
+    patch_strip = 1,
+    patches = ["//third_party:yaml-cpp.patch"],
+)
 
 bazel_dep(name = "rules_cuda")
 git_override(
     module_name = "rules_cuda",
     remote = "https://github.com/bazel-contrib/rules_cuda.git",
-    commit = "1bc391d927066ff35291186aa7a51d37f92f44f3",
+    # v0.3.0: loads CcInfo from @rules_cc//cc/common:cc_info.bzl, required for
+    # compatibility with rules_cc 0.2.x (the global CcInfo symbol was removed).
+    commit = "e10b718bc8d37abcb4c18d721806ef8ad74aa324",
 )
 
 cuda = use_extension("@rules_cuda//cuda:extensions.bzl", "toolchain")
+
+# Use a hermetic, downloadable CUDA toolkit instead of a local install. The
+# version matches the CUDA build of libtorch (cu124). Only the components needed
+# to compile against the CUDA headers are fetched; cudart's headers transitively
+# require the nvcc and cccl headers.
+cuda.redist_json(
+    name = "cuda_redist",
+    components = [
+        "cccl",
+        "cublas",
+        "cudart",
+        "cusolver",
+        "cusparse",
+        "nvcc",
+        "nvrtc",
+        "nvtx",
+    ],
+    # This redist is COMPILE-TIME ONLY: it provides the CUDA headers that
+    # libtorch's ATen/cuda/CUDAContextLight.h (reachable from train.h) pulls in
+    # -- cublas_v2.h, cublasLt.h, cusolverDn.h, cusparse.h, plus the cudart,
+    # nvcc and cccl headers they transitively require.
+    #
+    # It is NOT used at runtime. libtorch is self-contained for the CUDA
+    # runtime: it bundles its own CUDA libraries (under auditwheel-hashed
+    # filenames) and third_party/libtorch.bzl recreates the canonical soname
+    # symlinks so the libraries we link resolve them. Do not add these redist
+    # libraries as runtime/link deps -- that would ship a second, redundant copy
+    # of the CUDA runtime alongside libtorch's.
+    version = "12.4.1",
+)
 cuda.toolkit(
     name = "cuda",
     toolkit_path = "",

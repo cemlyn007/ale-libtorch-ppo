@@ -1,7 +1,27 @@
+# Bazel 9 removed the native cc_* rules; rules_cc 0.2.x serves them via load().
+# Re-enable autoloading for external repositories so legacy BCR module BUILD
+# files (e.g. yaml-cpp) keep working without patching each one. Our own BUILD
+# files load the rules explicitly, so main-repo autoloads stay disabled.
+common --incompatible_autoload_externally=+cc_library,+cc_binary,+cc_test,+cc_import,+cc_shared_library
+
 # Build options:
-build --action_env=BAZEL_CXXOPTS="-std=c++20"
+# Compile as C++20 (the project uses concepts/requires). In Bazel 9
+# --action_env=BAZEL_CXXOPTS no longer reaches the cc toolchain repo rule, so the
+# toolchain would fall back to its -std=c++17 default; set the standard explicitly
+# for both the target and exec (host) configurations instead.
+build --cxxopt='-std=c++20'
+build --host_cxxopt='-std=c++20'
+# GCC 15 defaults C to C23, where `bool`/`true`/`false` are keywords. The old
+# glib bundled in rules_foreign_cc's pkg-config tool declares a member named
+# `bool`, so build exec-config C sources (from which rules_foreign_cc derives
+# CFLAGS) as gnu17 instead.
+build --host_conlyopt='-std=gnu17'
 build --cxxopt='-Wall'
 build --cxxopt='-Werror'
+# Don't hold third-party code to our -Werror policy. e.g. protobuf 33.4 trips
+# -Werror=deprecated-declarations on its own internal use of a deprecated
+# constructor. Keep -Werror for our first-party sources only.
+build --per_file_copt=external/.*@-Wno-error
 
 # Debug build specific options:
 build:dbg --action_env=CUDA_LAUNCH_BLOCKING=1

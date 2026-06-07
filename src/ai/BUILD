@@ -22,6 +22,7 @@ cc_library(
         "//src/ai/environment:truncate_on_episode_return",
         "@arcade_learning_environment//:ale",
         "@libtorch//:torch",
+        "@spdlog",
     ],
 )
 

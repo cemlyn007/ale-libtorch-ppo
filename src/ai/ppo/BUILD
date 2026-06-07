@@ -26,6 +26,9 @@ cc_library(
     name = "train",
     srcs = ["train.cc"],
     hdrs = ["train.h"],
+    # libtorch 2.11's c10/cuda/CUDAEvent.h uses
+    # std::hardware_destructive_interference_size, which GCC flags under -Werror.
+    copts = ["-Wno-error=interference-size"],
     strip_include_prefix = "/src",
     deps = [
         ":losses",

@@ -8,130 +8,96 @@
 #include <iostream>
 #include <numeric>
 #include <torch/nn.h>
+#include <type_traits>
 #include <torch/torch.h>
 #include <yaml-cpp/yaml.h>
 
-const bool ANNEAL_ENTROPY_COEFFICIENT = false;
-
-// This is being used for annealing the entropy coefficient
-//  based on the average return.
-static double sum = 0;
-static double count = 1;
-
-double get_average_return() { return sum / count; }
-
-double get_annealed_entropy_coef(double entropy_coef) {
-  // This is a simple annealing function that decreases the entropy
-  // coefficient as the average return increases.
-  // 864 is the maximum episodic return for playing breakout.
-  if (!ANNEAL_ENTROPY_COEFFICIENT) {
-    return entropy_coef;
-  }
-  return entropy_coef * (864.0 - get_average_return()) / 864.0;
-}
-
 struct Config {
-  size_t total_environments;
-  size_t hidden_size;
+  size_t total_environments = 512;
+  size_t hidden_size = 512;
   const size_t action_size = 4;
-  size_t horizon;
-  size_t max_steps;
-  size_t frame_stack;
-  double learning_rate;
-  float clip_param;
-  float value_loss_coef;
-  float entropy_coef;
-  long num_epochs;
-  long mini_batch_size;
-  long num_mini_batches;
-  float gae_discount;
-  float gae_lambda;
-  float max_gradient_norm;
-  size_t num_rollouts;
-  size_t num_workers;
-  size_t worker_batch_size;
-  size_t frame_skip;
+  size_t horizon = 128;
+  size_t max_steps = 108000;
+  size_t frame_stack = 4;
+  double learning_rate = 2.5e-4;
+  float clip_param = 0.1f;
+  float value_loss_coef = 0.5f;
+  float entropy_coef = 0.01f;
+  long num_epochs = 1;
+  long mini_batch_size = 2048;
+  long num_mini_batches = 32;
+  float gae_discount = 0.99f;
+  float gae_lambda = 0.95f;
+  float max_gradient_norm = 0.5f;
+  size_t num_rollouts = 7000;
+  size_t num_workers = 16;
+  size_t worker_batch_size = 32;
+  size_t frame_skip = 4;
   // Some games like breakout have a maximum return
   // which should be used to reset the environment.
-  float max_return;
+  float max_return = -1.0f;
   // It is faster to record using the observation.
   // However the observation may be in grayscale.
-  bool record_observation;
-  bool record_video;
-  bool cuda_graph;
-  bool deterministic;
+  bool record_observation = false;
+  bool record_video = false;
+  bool cuda_graph = false;
+  bool deterministic = false;
 };
 
-google::protobuf::Value get_value(double value) {
-  google::protobuf::Value val;
-  val.set_number_value(value);
-  return val;
-}
-
-google::protobuf::Value get_bool_value(bool value) {
-  google::protobuf::Value val;
-  val.set_bool_value(value);
-  return val;
+// The single place where YAML keys bind to Config members. Each field keeps its
+// real type, so the loader and logger below stay strongly typed. action_size is
+// excluded: it is constant and not loaded from YAML (logged separately).
+template <typename Self, typename Visitor>
+void for_each_field(Self &config, Visitor &&visit) {
+  visit("total_environments", config.total_environments);
+  visit("hidden_size", config.hidden_size);
+  visit("horizon", config.horizon);
+  visit("max_steps", config.max_steps);
+  visit("frame_stack", config.frame_stack);
+  visit("learning_rate", config.learning_rate);
+  visit("clip_param", config.clip_param);
+  visit("value_loss_coef", config.value_loss_coef);
+  visit("entropy_coef", config.entropy_coef);
+  visit("num_epochs", config.num_epochs);
+  visit("mini_batch_size", config.mini_batch_size);
+  visit("num_mini_batches", config.num_mini_batches);
+  visit("gae_discount", config.gae_discount);
+  visit("gae_lambda", config.gae_lambda);
+  visit("max_gradient_norm", config.max_gradient_norm);
+  visit("num_rollouts", config.num_rollouts);
+  visit("num_workers", config.num_workers);
+  visit("worker_batch_size", config.worker_batch_size);
+  visit("frame_skip", config.frame_skip);
+  visit("max_return", config.max_return);
+  visit("record_observation", config.record_observation);
+  visit("record_video", config.record_video);
+  visit("cuda_graph", config.cuda_graph);
+  visit("deterministic", config.deterministic);
 }
 
 std::map<std::string, google::protobuf::Value>
 get_parameters(const Config &config) {
   std::map<std::string, google::protobuf::Value> hparams;
-  hparams["total_environments"] = get_value(config.total_environments);
-  hparams["hidden_size"] = get_value(config.hidden_size);
-  hparams["action_size"] = get_value(config.action_size);
-  hparams["horizon"] = get_value(config.horizon);
-  hparams["max_steps"] = get_value(config.max_steps);
-  hparams["frame_stack"] = get_value(config.frame_stack);
-  hparams["learning_rate"] = get_value(config.learning_rate);
-  hparams["clip_param"] = get_value(config.clip_param);
-  hparams["value_loss_coef"] = get_value(config.value_loss_coef);
-  hparams["entropy_coef"] = get_value(config.entropy_coef);
-  hparams["num_epochs"] = get_value(config.num_epochs);
-  hparams["mini_batch_size"] = get_value(config.mini_batch_size);
-  hparams["num_mini_batches"] = get_value(config.num_mini_batches);
-  hparams["gae_discount"] = get_value(config.gae_discount);
-  hparams["gae_lambda"] = get_value(config.gae_lambda);
-  hparams["max_gradient_norm"] = get_value(config.max_gradient_norm);
-  hparams["num_rollouts"] = get_value(config.num_rollouts);
-  hparams["num_workers"] = get_value(config.num_workers);
-  hparams["worker_batch_size"] = get_value(config.worker_batch_size);
-  hparams["frame_skip"] = get_value(config.frame_skip);
-  hparams["max_return"] = get_value(config.max_return);
-  hparams["record_observation"] = get_bool_value(config.record_observation);
-  hparams["record_video"] = get_bool_value(config.record_video);
-  hparams["cuda_graph"] = get_bool_value(config.cuda_graph);
-  hparams["deterministic"] = get_bool_value(config.deterministic);
+  auto put = [&](const char *name, const auto &field) {
+    google::protobuf::Value value;
+    if constexpr (std::is_same_v<std::decay_t<decltype(field)>, bool>)
+      value.set_bool_value(field);
+    else
+      value.set_number_value(static_cast<double>(field));
+    hparams[name] = value;
+  };
+  for_each_field(config, put);
+  put("action_size", config.action_size);
   return hparams;
 }
 
 Config load_config(const std::filesystem::path &path) {
   Config config;
   YAML::Node node = YAML::LoadFile(path.string());
-  config.total_environments = node["total_environments"].as<size_t>(512);
-  config.hidden_size = node["hidden_size"].as<size_t>(512);
-  config.horizon = node["horizon"].as<size_t>(128);
-  config.max_steps = node["max_steps"].as<size_t>(108000);
-  config.frame_stack = node["frame_stack"].as<size_t>(4);
-  config.learning_rate = node["learning_rate"].as<double>(2.5e-4);
-  config.clip_param = node["clip_param"].as<float>(0.1f);
-  config.value_loss_coef = node["value_loss_coef"].as<float>(0.5f);
-  config.entropy_coef = node["entropy_coef"].as<float>(0.01f);
-  config.num_epochs = node["num_epochs"].as<long>(1);
-  config.mini_batch_size = node["mini_batch_size"].as<long>(2048);
-  config.num_mini_batches = node["num_mini_batches"].as<long>(32);
-  config.gae_discount = node["gae_discount"].as<float>(0.99f);
-  config.gae_lambda = node["gae_lambda"].as<float>(0.95f);
-  config.max_gradient_norm = node["max_gradient_norm"].as<float>(0.5f);
-  config.num_rollouts = node["num_rollouts"].as<size_t>(7000);
-  config.num_workers = node["num_workers"].as<size_t>(16);
-  config.worker_batch_size = node["worker_batch_size"].as<size_t>(32);
-  config.frame_skip = node["frame_skip"].as<size_t>(4);
-  config.max_return = node["max_return"].as<float>(-1.0f);
-  config.record_observation = node["record_observation"].as<bool>(false);
-  config.record_video = node["record_video"].as<bool>(false);
-  config.cuda_graph = node["cuda_graph"].as<bool>(false);
-  config.deterministic = node["deterministic"].as<bool>(false);
+  for_each_field(config, [&](const char *name, auto &field) {
+    // Default to the in-struct value when the key is absent.
+    field = node[name].as<std::decay_t<decltype(field)>>(field);
+  });
   return config;
 }
 
@@ -283,10 +249,10 @@ ai::ppo::train::Batch prepare_batch(ai::buffer::Batch &batch) {
 }
 
 ai::ppo::train::Hyperparameters prepare_hyperparameters(const Config &config) {
-  ai::ppo::train::Hyperparameters hp = {
-      config.clip_param, config.value_loss_coef,
-      static_cast<float>(get_annealed_entropy_coef(config.entropy_coef)),
-      config.max_gradient_norm};
+  ai::ppo::train::Hyperparameters hp = {config.clip_param,
+                                        config.value_loss_coef,
+                                        config.entropy_coef,
+                                        config.max_gradient_norm};
   return hp;
 }
 
@@ -452,9 +418,6 @@ int main(int argc, char **argv) {
              static_cast<torch::optim::AdamOptions &>(
                  optimizer.param_groups()[0].options())
                  .lr());
-    sum += std::accumulate(result.log.episode_returns.begin(),
-                           result.log.episode_returns.end(), 0.0f);
-    count += result.log.episode_returns.size();
   }
   if (!profile_path.empty()) {
     auto profiler_result = torch::autograd::profiler::disableProfiler();

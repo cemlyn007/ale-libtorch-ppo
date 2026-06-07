@@ -9,6 +9,19 @@
           }
         ]
       }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PROJECT_DIR}/.claude/hooks/refresh-compile-commands.sh\"",
+            "statusMessage": "Refreshing compile_commands.json for clangd…",
+            "timeout": 600
+          }
+        ]
+      }
     ]
   }
 }

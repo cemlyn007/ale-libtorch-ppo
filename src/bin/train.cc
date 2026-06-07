@@ -15,7 +15,6 @@
 struct Config {
   size_t total_environments;
   size_t hidden_size;
-  const size_t action_size = 4;
   size_t horizon;
   size_t max_steps;
   size_t frame_stack;
@@ -76,7 +75,7 @@ void for_each_field(Self &config, Visitor &&visit) {
 }
 
 std::map<std::string, google::protobuf::Value>
-get_parameters(const Config &config) {
+get_parameters(const Config &config, size_t action_size) {
   std::map<std::string, google::protobuf::Value> hparams;
   auto put = [&](const char *name, const auto &field) {
     google::protobuf::Value value;
@@ -87,7 +86,9 @@ get_parameters(const Config &config) {
     hparams[name] = value;
   };
   for_each_field(config, put);
-  put("action_size", config.action_size);
+  // action_size is a property of the ROM (ALE's minimal action set), not a
+  // configured value, so it is supplied at runtime rather than from YAML.
+  put("action_size", action_size);
   return hparams;
 }
 
@@ -323,8 +324,17 @@ int main(int argc, char **argv) {
   if (config.deterministic)
     enable_torch_determinism(42);
 
+  // The action count is a property of the ROM, not a configured value: read it
+  // from ALE's minimal action set (matching what the rollout buffer uses).
+  size_t action_size;
+  {
+    ale::ALEInterface ale;
+    ale.loadROM(rom_path);
+    action_size = ale.getMinimalActionSet().size();
+  }
+
   TensorBoardLogger logger(logger_path);
-  Network network(config.hidden_size, config.action_size);
+  Network network(config.hidden_size, action_size);
   network->to(device);
   torch::optim::Adam optimizer(
       network->parameters(),
@@ -333,7 +343,7 @@ int main(int argc, char **argv) {
   ai::rollout::Rollout rollout(
       rom_path, config.total_environments, config.horizon, config.max_steps,
       config.frame_stack, true,
-      [&network, &device, action_size = config.action_size](
+      [&network, &device, action_size](
           const torch::Tensor &obs) -> ai::rollout::ActionResult {
         network->eval();
         torch::NoGradGuard no_grad;
@@ -355,7 +365,8 @@ int main(int argc, char **argv) {
   ai::ppo::train::Metrics metrics(config.num_epochs, config.num_mini_batches,
                                   config.mini_batch_size, device);
 
-  logger.add_hparams(get_parameters(config), group_name, start_time);
+  logger.add_hparams(get_parameters(config, action_size), group_name,
+                     start_time);
 
   ai::buffer::Batch b;
   {

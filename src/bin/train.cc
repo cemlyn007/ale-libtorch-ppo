@@ -7,6 +7,7 @@
 #include <ale/ale_interface.hpp>
 #include <ale/common/Log.hpp>
 #include <ale/version.hpp>
+#include <limits>
 #include <numeric>
 #include <spdlog/spdlog.h>
 #include <torch/nn.h>
@@ -43,6 +44,13 @@ struct Config {
   bool record_video;
   bool cuda_graph;
   bool deterministic;
+  // Write latest.pt every `checkpoint_interval` rollouts (0 disables all
+  // checkpointing) and best.pt whenever mean episode return improves, both into
+  // a run directory keyed by the same start_time stamp as the tfevents file.
+  size_t checkpoint_interval;
+  // Path to a checkpoint .pt to restore network + optimizer + step from; empty
+  // starts fresh.
+  std::string resume_from;
 };
 
 // The single place where YAML keys bind to Config members. Each field keeps its
@@ -74,15 +82,20 @@ void for_each_field(Self &config, Visitor &&visit) {
   visit("record_video", config.record_video);
   visit("cuda_graph", config.cuda_graph);
   visit("deterministic", config.deterministic);
+  visit("checkpoint_interval", config.checkpoint_interval);
+  visit("resume_from", config.resume_from);
 }
 
 std::map<std::string, google::protobuf::Value>
 get_parameters(const Config &config, size_t action_size) {
   std::map<std::string, google::protobuf::Value> hparams;
   auto put = [&](const char *name, const auto &field) {
+    using Field = std::decay_t<decltype(field)>;
     google::protobuf::Value value;
-    if constexpr (std::is_same_v<std::decay_t<decltype(field)>, bool>)
+    if constexpr (std::is_same_v<Field, bool>)
       value.set_bool_value(field);
+    else if constexpr (std::is_same_v<Field, std::string>)
+      value.set_string_value(field);
     else
       value.set_number_value(static_cast<double>(field));
     hparams[name] = value;
@@ -132,53 +145,51 @@ std::vector<float> to_vector(const torch::Tensor &tensor) {
   return std::vector<float>(data_ptr, data_ptr + t.numel());
 }
 
+// `step` is the absolute global env step (log.steps offset by any resumed run's
+// starting step) so a resumed run's curves continue rather than restart at 0.
 void log_data(TensorBoardLogger &logger, const ai::rollout::Log &log,
-              const ai::ppo::train::Metrics &metrics, double lr) {
+              const ai::ppo::train::Metrics &metrics, double lr, size_t step) {
   if (!log.episode_returns.empty()) {
-    logger.add_scalar("mean_episode_return", log.steps,
-                      mean(log.episode_returns));
-    logger.add_scalar("mean_episode_length", log.steps,
-                      mean(log.episode_lengths));
-    logger.add_histogram("episode_returns", log.steps, log.episode_returns);
-    logger.add_histogram("episode_lengths", log.steps, log.episode_lengths);
+    logger.add_scalar("mean_episode_return", step, mean(log.episode_returns));
+    logger.add_scalar("mean_episode_length", step, mean(log.episode_lengths));
+    logger.add_histogram("episode_returns", step, log.episode_returns);
+    logger.add_histogram("episode_lengths", step, log.episode_lengths);
 
     if (!log.game_returns.empty()) {
-      logger.add_scalar("mean_game_return", log.steps, mean(log.game_returns));
-      logger.add_scalar("mean_game_length", log.steps, mean(log.game_lengths));
-      logger.add_histogram("game_returns", log.steps, log.game_returns);
-      logger.add_histogram("game_lengths", log.steps, log.game_lengths);
+      logger.add_scalar("mean_game_return", step, mean(log.game_returns));
+      logger.add_scalar("mean_game_length", step, mean(log.game_lengths));
+      logger.add_histogram("game_returns", step, log.game_returns);
+      logger.add_histogram("game_lengths", step, log.game_lengths);
     }
   }
-  logger.add_scalar("mean_clipped_gradient", log.steps,
+  logger.add_scalar("mean_clipped_gradient", step,
                     metrics.clipped_gradients.mean().item<float>());
-  logger.add_scalar("mean_loss", log.steps, metrics.loss.mean().item<float>());
-  logger.add_scalar("mean_clipped_loss", log.steps,
+  logger.add_scalar("mean_loss", step, metrics.loss.mean().item<float>());
+  logger.add_scalar("mean_clipped_loss", step,
                     mean(metrics.clipped_losses, metrics.masks));
-  logger.add_scalar("mean_value_loss", log.steps,
+  logger.add_scalar("mean_value_loss", step,
                     mean(metrics.value_losses, metrics.masks));
-  logger.add_scalar("mean_entropy", log.steps,
+  logger.add_scalar("mean_entropy", step,
                     mean(metrics.entropies, metrics.masks));
-  logger.add_scalar("mean_ratio", log.steps,
-                    mean(metrics.ratio, metrics.masks));
+  logger.add_scalar("mean_ratio", step, mean(metrics.ratio, metrics.masks));
   if (metrics.clipped_gradients.numel() > 1)
-    logger.add_histogram("clipped_gradients", log.steps,
+    logger.add_histogram("clipped_gradients", step,
                          to_vector(metrics.clipped_gradients));
-  logger.add_histogram("losses", log.steps,
+  logger.add_histogram("losses", step,
                        gather(metrics.total_losses, metrics.masks));
-  logger.add_histogram("clipped_losses", log.steps,
+  logger.add_histogram("clipped_losses", step,
                        gather(metrics.clipped_losses, metrics.masks));
-  logger.add_histogram("value_losses", log.steps,
+  logger.add_histogram("value_losses", step,
                        gather(metrics.value_losses, metrics.masks));
-  logger.add_histogram("entropies", log.steps,
+  logger.add_histogram("entropies", step,
                        gather(metrics.entropies, metrics.masks));
-  logger.add_histogram("ratios", log.steps,
-                       gather(metrics.ratio, metrics.masks));
-  logger.add_histogram("advantages", log.steps,
+  logger.add_histogram("ratios", step, gather(metrics.ratio, metrics.masks));
+  logger.add_histogram("advantages", step,
                        gather(metrics.advantages, metrics.masks));
-  logger.add_histogram("returns", log.steps,
+  logger.add_histogram("returns", step,
                        gather(metrics.returns, metrics.masks));
 
-  logger.add_scalar("learning_rate", log.steps, lr);
+  logger.add_scalar("learning_rate", step, lr);
 }
 
 torch::nn::Conv2d layer_init(torch::nn::Conv2d layer,
@@ -289,6 +300,62 @@ void enable_torch_determinism(uint64_t seed) {
   torch::globalContext().setDeterministicFillUninitializedMemory(true);
 }
 
+// Everything needed to resume a run: model weights, optimizer moments, the next
+// rollout to run (so the LR schedule continues), and the best return seen so the
+// best.pt criterion survives a resume.
+struct Checkpoint {
+  size_t next_rollout_index;
+  double best_return;
+  // Absolute global env step at save time, so a resumed run's TensorBoard
+  // curves continue from here instead of restarting at 0.
+  size_t global_step;
+};
+
+void save_checkpoint(const std::filesystem::path &path, const Network &network,
+                     const torch::optim::Adam &optimizer,
+                     const Checkpoint &state) {
+  torch::serialize::OutputArchive archive;
+  torch::serialize::OutputArchive model_archive;
+  network->save(model_archive);
+  archive.write("model", model_archive);
+  torch::serialize::OutputArchive optimizer_archive;
+  optimizer.save(optimizer_archive);
+  archive.write("optimizer", optimizer_archive);
+  archive.write("next_rollout_index",
+                c10::IValue(static_cast<int64_t>(state.next_rollout_index)));
+  archive.write("best_return", c10::IValue(state.best_return));
+  archive.write("global_step",
+                c10::IValue(static_cast<int64_t>(state.global_step)));
+  // Write to a sibling temp file then rename: rename is atomic on a single
+  // filesystem, so a crash mid-write can never truncate an existing checkpoint.
+  auto tmp = path;
+  tmp += ".tmp";
+  archive.save_to(tmp.string());
+  std::filesystem::rename(tmp, path);
+}
+
+Checkpoint load_checkpoint(const std::filesystem::path &path, Network &network,
+                           torch::optim::Adam &optimizer,
+                           const torch::Device &device) {
+  torch::serialize::InputArchive archive;
+  // Remap storages onto the current device so a CPU-saved checkpoint resumes on
+  // GPU and vice versa. Module::load copies into the existing parameters in
+  // place, keeping the tensors the optimizer already references valid.
+  archive.load_from(path.string(), device);
+  torch::serialize::InputArchive model_archive;
+  archive.read("model", model_archive);
+  network->load(model_archive);
+  torch::serialize::InputArchive optimizer_archive;
+  archive.read("optimizer", optimizer_archive);
+  optimizer.load(optimizer_archive);
+  c10::IValue next_rollout_index, best_return, global_step;
+  archive.read("next_rollout_index", next_rollout_index);
+  archive.read("best_return", best_return);
+  archive.read("global_step", global_step);
+  return {static_cast<size_t>(next_rollout_index.toInt()),
+          best_return.toDouble(), static_cast<size_t>(global_step.toInt())};
+}
+
 int main(int argc, char **argv) {
   stop_signal::StopSignal stop{SIGTERM, SIGINT};
 
@@ -300,9 +367,21 @@ int main(int argc, char **argv) {
   const auto start_time =
       std::chrono::system_clock::now().time_since_epoch().count();
   const auto rom_path = std::filesystem::path(argv[1]);
-  const auto logger_path = std::filesystem::path(argv[2]).replace_extension(
-      "tfevents." + std::to_string(start_time));
   const auto config = load_config(std::filesystem::path(argv[5]));
+  // A run is a self-contained directory holding its event file and checkpoints.
+  // A fresh run gets a new directory keyed by start_time. Resuming reuses the
+  // directory that holds the checkpoint, so TensorBoard merges the new event
+  // file into the same run and (with the restored global step) the metric
+  // curves continue rather than restarting.
+  const std::filesystem::path run_dir =
+      config.resume_from.empty()
+          ? std::filesystem::path(argv[2]).parent_path() /
+                (std::filesystem::path(argv[2]).filename().string() + "." +
+                 std::to_string(start_time))
+          : std::filesystem::path(config.resume_from).parent_path();
+  const std::filesystem::path logger_path =
+      run_dir / (std::filesystem::path(argv[2]).filename().string() +
+                 ".tfevents." + std::to_string(start_time));
   const std::optional<std::filesystem::path> video_path =
       config.record_video
           ? std::optional<std::filesystem::path>(std::filesystem::path(argv[3]))
@@ -348,6 +427,22 @@ int main(int argc, char **argv) {
   torch::optim::Adam optimizer(
       network->parameters(),
       torch::optim::AdamOptions(config.learning_rate).eps(1e-5));
+
+  // Resume before the initial rollout and any CUDA-graph capture so the graph
+  // captures the restored weights/optimizer state. The rollout RNG and env
+  // state are not saved, so resumption is approximate, not bit-exact.
+  size_t start_rollout_index = 0;
+  double best_return = -std::numeric_limits<double>::infinity();
+  size_t step_offset = 0;
+  if (!config.resume_from.empty()) {
+    const Checkpoint state =
+        load_checkpoint(config.resume_from, network, optimizer, device);
+    start_rollout_index = state.next_rollout_index;
+    best_return = state.best_return;
+    step_offset = state.global_step;
+    spdlog::info("Resumed from {} at rollout {} (global step {})",
+                 config.resume_from, start_rollout_index, step_offset);
+  }
 
   ai::rollout::Rollout rollout(
       rom_path, config.total_environments, config.horizon, config.max_steps,
@@ -406,8 +501,8 @@ int main(int argc, char **argv) {
         profiler_config, activities,
         {torch::RecordScope::FUNCTION, torch::RecordScope::USER_SCOPE});
   }
-  for (size_t rollout_index = 0; rollout_index < config.num_rollouts;
-       ++rollout_index) {
+  for (size_t rollout_index = start_rollout_index;
+       rollout_index < config.num_rollouts; ++rollout_index) {
     if (stop.requested()) {
       spdlog::info("Stop requested — finalizing and shutting down...");
       break;
@@ -440,10 +535,38 @@ int main(int argc, char **argv) {
                             config.num_epochs, config.num_mini_batches, hp);
     }
 
+    // Absolute global step: continues across a resume so the curves don't
+    // restart at 0.
+    const size_t step = step_offset + result.log.steps;
     log_data(logger, result.log, metrics,
              static_cast<torch::optim::AdamOptions &>(
                  optimizer.param_groups()[0].options())
-                 .lr());
+                 .lr(),
+             step);
+
+    if (config.checkpoint_interval > 0) {
+      // next_rollout_index is rollout_index + 1: resuming continues with the
+      // rollout after the one just trained on.
+      if (!result.log.episode_returns.empty()) {
+        const double rollout_return = mean(result.log.episode_returns);
+        if (rollout_return > best_return) {
+          best_return = rollout_return;
+          save_checkpoint(run_dir / "best.pt", network, optimizer,
+                          {rollout_index + 1, best_return, step});
+          logger.add_text("checkpoint", step,
+                          ("best.pt return=" + std::to_string(best_return) +
+                           " rollout=" + std::to_string(rollout_index + 1))
+                              .c_str());
+        }
+      }
+      if ((rollout_index + 1) % config.checkpoint_interval == 0) {
+        save_checkpoint(run_dir / "latest.pt", network, optimizer,
+                        {rollout_index + 1, best_return, step});
+        logger.add_text(
+            "checkpoint", step,
+            ("latest.pt rollout=" + std::to_string(rollout_index + 1)).c_str());
+      }
+    }
   }
   if (!profile_path.empty()) {
     auto profiler_result = torch::autograd::profiler::disableProfiler();

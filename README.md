@@ -33,12 +33,23 @@ To run the project, follow these steps:
    ```
    Or alternatively, with VS Code, you can run the tasks. The command line arguments do the following:
    1. Specify which ROM to use.
-   2. Specify the directory to write TensorBoard logs to.
+   2. Specify the run-name base for logs. A fresh run creates a per-run directory `<base>.<start_time>/` (e.g. `logs/train.<t>/`) holding its TensorBoard event file and checkpoints.
    3. Specify the directory to write videos to.
    4. Specify the group name used for logging parameters to TensorBoard.
    5. Specify the path to the YAML file containing the config to use for running the application.
    6. Optional: specify the location to write a libtorch profile to which can be examined using Perfetto.
-  
+
+### Checkpointing
+
+Each run is a self-contained directory — `<base>.<start_time>/` — holding its TensorBoard event file and its checkpoints (`latest.pt`, `best.pt`). Two config keys control checkpointing (see any file in `configs/`):
+
+* `checkpoint_interval`: write `latest.pt` every N rollouts, and `best.pt` whenever the mean episode return improves. `0` disables checkpointing entirely.
+* `resume_from`: path to a checkpoint `.pt` to restore from. Empty starts fresh.
+
+A checkpoint bundles the network weights, optimizer (Adam) state, the next rollout index (so the learning-rate schedule continues), and the global env step. Each save also drops a `checkpoint` text marker on the TensorBoard timeline so saves and resume points are visible there.
+
+**Resuming continues the same TensorBoard experiment.** Because `resume_from` points at a checkpoint inside an existing run directory, the resumed process writes its new event file into that *same* directory, and TensorBoard merges all event files in a directory into one run. The restored global step means the metric curves continue from where they stopped rather than restarting at 0 — so an interrupted run picks up as a single, continuous timeline. The rollout RNG and environment state are not saved, so resumption is approximate rather than bit-exact.
+
 ## Results
 Evaluated using the following hardware:
 * ASUS ROG STRIX X670E-F GAMING WIFI

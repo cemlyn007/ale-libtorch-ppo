@@ -5,21 +5,24 @@ load("@platforms//host:constraints.bzl", "HOST_CONSTRAINTS")
 
 _INTEGRITIES = {
     # Generate with "sha256-$(curl -fsSL "$url" | sha256sum | cut -d' ' -f1 | xxd -r -p | base64)"
-    "2.4.1": {
-        "linux": "sha256-6+3DGHVt0SIpZEvySnZDThog90kb403wponxUUQPCgo=",
-        "macos": "sha256-2ackf8X8D7n/G0+4bgDXuYuQJvrAXUfYkkPhjRRg4hE=",
+    "2.11.0": {
+        "linux": "sha256-KZwJPeN07mAKdFDTsD6vQ4+DjCzKqrvrZelO4QeDBlY=",
+        "macos": "sha256-DtwThUXISHkkDMB5lPHpoO01oRAv/iuZ4T86e1ezI+k=",
     },
 }
 
 _URLS = {
-    "2.4.1": {
-        "linux": "https://download.pytorch.org/libtorch/cu124/libtorch-cxx11-abi-shared-with-deps-2.4.1%2Bcu124.zip",
-        "macos": "https://download.pytorch.org/libtorch/cpu/libtorch-macos-arm64-2.4.1.zip",
+    "2.11.0": {
+        # cu126: PyTorch dropped the pre-cxx11 ABI, so the Linux artifact lost the
+        # "cxx11-abi-" filename prefix. (2.12 onward unbundles the CUDA runtime
+        # from the zip; 2.11 is the last release that still ships it inline.)
+        "linux": "https://download.pytorch.org/libtorch/cu126/libtorch-shared-with-deps-2.11.0%2Bcu126.zip",
+        "macos": "https://download.pytorch.org/libtorch/cpu/libtorch-macos-arm64-2.11.0.zip",
     },
 }
 
 def _libtorch_configure_extension_impl(module_ctx):
-    version = "2.4.1"  # default version
+    version = "2.11.0"  # default version
     for mod in module_ctx.modules:
         for tag in mod.tags.configure:
             if tag.version:

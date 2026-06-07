@@ -41,7 +41,7 @@ bazel_dep(name = "stb", version = "0.0.0-20241109-5c20573")
 
 libtorch_extension = use_extension("//third_party:libtorch.bzl", "libtorch_configure_extension")
 libtorch_extension.configure(
-    version = "2.4.1",  # Specify your desired version here
+    version = "2.11.0",  # Specify your desired version here
 )
 use_repo(libtorch_extension, "libtorch")
 
@@ -66,7 +66,7 @@ bazel_dep(name = "rules_cuda", version = "0.3.0")
 
 cuda = use_extension("@rules_cuda//cuda:extensions.bzl", "toolchain")
 
-# Hermetic CUDA toolkit matching libtorch's cu124 build. Compile-time ONLY: it
+# Hermetic CUDA toolkit matching libtorch's cu126 build. Compile-time ONLY: it
 # supplies the CUDA headers reachable from train.h. Don't add these as link or
 # runtime deps -- libtorch bundles its own CUDA runtime (see libtorch.bzl), and
 # a second copy would clash.
@@ -82,7 +82,7 @@ cuda.redist_json(
         "nvrtc",
         "nvtx",
     ],
-    version = "12.4.1",
+    version = "12.6.3",
 )
 cuda.toolkit(
     name = "cuda",

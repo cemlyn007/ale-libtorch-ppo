@@ -14,6 +14,7 @@ cc_binary(
     ],
     deps = [
         "//src:ai",
+        "//src:stop_signal",
         "@arcade_learning_environment//:ale",
         "@libtorch//:torch",
         "@spdlog",

@@ -21,7 +21,10 @@ VideoRecorder::VideoRecorder(const std::filesystem::path &video_path,
 
 VideoRecorder::~VideoRecorder() {
   if (ffmpeg_stream_) {
-    close();
+    // Best-effort finalize: send EOF and reap ffmpeg so it writes the mp4
+    // trailer. Never throw from a destructor (this runs during rollout teardown).
+    pclose(ffmpeg_stream_);
+    ffmpeg_stream_ = nullptr;
   }
 }
 

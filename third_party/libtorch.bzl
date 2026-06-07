@@ -6,17 +6,21 @@ load("@platforms//host:constraints.bzl", "HOST_CONSTRAINTS")
 _INTEGRITIES = {
     # Generate with "sha256-$(curl -fsSL "$url" | sha256sum | cut -d' ' -f1 | xxd -r -p | base64)"
     "2.11.0": {
-        "linux": "sha256-KZwJPeN07mAKdFDTsD6vQ4+DjCzKqrvrZelO4QeDBlY=",
+        "linux": "sha256-RYdLyHo7Oe28JtckUcMSuS/IosADKdTfBxVBUmpy/kk=",
         "macos": "sha256-DtwThUXISHkkDMB5lPHpoO01oRAv/iuZ4T86e1ezI+k=",
     },
 }
 
 _URLS = {
     "2.11.0": {
-        # cu126: PyTorch dropped the pre-cxx11 ABI, so the Linux artifact lost the
-        # "cxx11-abi-" filename prefix. (2.12 onward unbundles the CUDA runtime
-        # from the zip; 2.11 is the last release that still ships it inline.)
-        "linux": "https://download.pytorch.org/libtorch/cu126/libtorch-shared-with-deps-2.11.0%2Bcu126.zip",
+        # cu129 is the newest CUDA build that still bundles the runtime inline:
+        # 2.12+ unbundles it (RPATH points at pip-wheel dirs) and the cu130 zip
+        # drops ~1.3GB of bundled libs, so neither loads under our one-cc_library
+        # scheme. cu129 ships the same set as cu126 minus libnvToolsExt (CUDA 12.9
+        # moved NVTX to header-only NVTX3, which nothing here DT_NEEDEDs). PyTorch
+        # also dropped the pre-cxx11 ABI, so the Linux artifact has no
+        # "cxx11-abi-" filename prefix.
+        "linux": "https://download.pytorch.org/libtorch/cu129/libtorch-shared-with-deps-2.11.0%2Bcu129.zip",
         "macos": "https://download.pytorch.org/libtorch/cpu/libtorch-macos-arm64-2.11.0.zip",
     },
 }

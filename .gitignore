@@ -4,3 +4,4 @@ logs
 videos
 images
 *.mp4
+.claude/worktrees/

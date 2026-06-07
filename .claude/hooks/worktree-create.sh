@@ -28,4 +28,12 @@ for d in logs roms videos images; do
   ln -sfn "$ROOT/$d" "$DIR/$d"
 done
 
+# Seed compile_commands.json for clangd: reuse the main checkout's if present,
+# otherwise generate one in the worktree via hedron's refresh target.
+if [ -f "$ROOT/compile_commands.json" ]; then
+  cp "$ROOT/compile_commands.json" "$DIR/compile_commands.json"
+else
+  ( cd "$DIR" && bazel run //:refresh_compile_commands >&2 )
+fi
+
 echo "$DIR"

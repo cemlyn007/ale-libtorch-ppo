@@ -18,5 +18,8 @@ cc_binary(
         "@libtorch//:torch",
         "@tensorboard_logger",
         "@yaml-cpp//:yaml-cpp",
-    ],
+    ] + select({
+        "@platforms//os:linux": ["//third_party:cuda_runtime"],
+        "//conditions:default": [],
+    }),
 )

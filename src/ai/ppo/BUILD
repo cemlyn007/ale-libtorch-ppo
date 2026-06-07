@@ -34,7 +34,7 @@ cc_library(
         ":losses",
         "@libtorch//:torch",
     ] + select({
-        "@platforms//os:linux": ["@cuda//:cuda_headers"],
+        "@platforms//os:linux": ["//third_party:cuda_headers"],
         "//conditions:default": [],
     }),
 )

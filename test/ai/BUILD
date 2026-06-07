@@ -26,7 +26,11 @@ cc_test(
         "//src:ai",
         "@googletest//:gtest_main",
         "@libtorch//:torch",
-    ],
+    ] + select({
+        # cu130 libtorch DT_NEEDEDs the CUDA runtime; supply it so the test loads.
+        "@platforms//os:linux": ["//third_party:cuda_runtime"],
+        "//conditions:default": [],
+    }),
 )
 
 cc_test(
@@ -37,5 +41,9 @@ cc_test(
         "//src:ai",
         "@googletest//:gtest_main",
         "@libtorch//:torch",
-    ],
+    ] + select({
+        # cu130 libtorch DT_NEEDEDs the CUDA runtime; supply it so the test loads.
+        "@platforms//os:linux": ["//third_party:cuda_runtime"],
+        "//conditions:default": [],
+    }),
 )

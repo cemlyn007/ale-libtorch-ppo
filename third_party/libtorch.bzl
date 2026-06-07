@@ -5,28 +5,28 @@ load("@platforms//host:constraints.bzl", "HOST_CONSTRAINTS")
 
 _INTEGRITIES = {
     # Generate with "sha256-$(curl -fsSL "$url" | sha256sum | cut -d' ' -f1 | xxd -r -p | base64)"
-    "2.11.0": {
-        "linux": "sha256-RYdLyHo7Oe28JtckUcMSuS/IosADKdTfBxVBUmpy/kk=",
-        "macos": "sha256-DtwThUXISHkkDMB5lPHpoO01oRAv/iuZ4T86e1ezI+k=",
+    "2.12.0": {
+        "linux": "sha256-ozflm2cdMcEOQV4ENeik8s4w7YTpbkf7jTgMlwxF2xI=",
+        "macos": "sha256-F3v2xMnpvGyJg702K38QAx5f+r/H+wHh8XOzpNSh81U=",
     },
 }
 
 _URLS = {
-    "2.11.0": {
-        # cu129 is the newest CUDA build that still bundles the runtime inline:
-        # 2.12+ unbundles it (RPATH points at pip-wheel dirs) and the cu130 zip
-        # drops ~1.3GB of bundled libs, so neither loads under our one-cc_library
-        # scheme. cu129 ships the same set as cu126 minus libnvToolsExt (CUDA 12.9
-        # moved NVTX to header-only NVTX3, which nothing here DT_NEEDEDs). PyTorch
-        # also dropped the pre-cxx11 ABI, so the Linux artifact has no
-        # "cxx11-abi-" filename prefix.
-        "linux": "https://download.pytorch.org/libtorch/cu129/libtorch-shared-with-deps-2.11.0%2Bcu129.zip",
-        "macos": "https://download.pytorch.org/libtorch/cpu/libtorch-macos-arm64-2.11.0.zip",
+    "2.12.0": {
+        # cu130 (CUDA 13). Unlike <=cu129, the 2.12 zip no longer bundles the
+        # CUDA runtime -- it ships only torch's own ~11 .so plus libgomp, and
+        # DT_NEEDEDs libcudart/libcublas/libcudnn/libnccl/... by bare soname. We
+        # supply those hermetically: the CUDA *toolkit* libs come from rules_cuda
+        # @cuda redist (13.0.2), and cudnn/cusparseLt/nccl/nvshmem (not in the
+        # toolkit redist) from the bespoke @cudnn/@cusparselt/@nccl/@nvshmem
+        # http_archives. See MODULE.bazel + //third_party:cuda_runtime.
+        "linux": "https://download.pytorch.org/libtorch/cu130/libtorch-shared-with-deps-2.12.0%2Bcu130.zip",
+        "macos": "https://download.pytorch.org/libtorch/cpu/libtorch-macos-arm64-2.12.0.zip",
     },
 }
 
 def _libtorch_configure_extension_impl(module_ctx):
-    version = "2.11.0"  # default version
+    version = "2.12.0"  # default version
     for mod in module_ctx.modules:
         for tag in mod.tags.configure:
             if tag.version:
@@ -63,23 +63,9 @@ def _libtorch_configure_extension_impl(module_ctx):
         strip_prefix = "libtorch",
         url = _URLS.get(version).get(os),
         integrity = _INTEGRITIES.get(version).get(os),
-        # The vendored CUDA/OpenMP libs have auditwheel-hashed filenames (e.g.
-        # libcudart-e6b31d9c.so.12) but canonical sonames (libcudart.so.12).
-        # Anything we link records a DT_NEEDED on the canonical name, which
-        # exists nowhere in the distribution -- recreate the soname -> hashed-file
-        # symlinks (as a normal CUDA install would) so those entries resolve.
-        patch_cmds = [
-            """
-            for f in lib/*.so*; do
-                b=$(basename "$f")
-                [ -L "lib/$b" ] && continue
-                canon=$(printf '%s' "$b" | sed -E 's/-[0-9a-f]+(\\.so)/\\1/')
-                if [ "$canon" != "$b" ] && [ ! -e "lib/$canon" ]; then
-                    ln -s "$b" "lib/$canon"
-                fi
-            done
-            """,
-        ],
+        # No soname patching needed: the cu130 zip ships only torch's own libs
+        # (canonical sonames, no auditwheel hashing), and the hermetic CUDA libs
+        # we add separately already carry their soname symlinks.
     )
     return module_ctx.extension_metadata(reproducible = True)
 

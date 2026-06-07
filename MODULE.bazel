@@ -41,7 +41,7 @@ bazel_dep(name = "stb", version = "0.0.0-20241109-5c20573")
 
 libtorch_extension = use_extension("//third_party:libtorch.bzl", "libtorch_configure_extension")
 libtorch_extension.configure(
-    version = "2.11.0",  # Specify your desired version here
+    version = "2.12.0",  # Specify your desired version here
 )
 use_repo(libtorch_extension, "libtorch")
 
@@ -66,29 +66,80 @@ bazel_dep(name = "rules_cuda", version = "0.3.0")
 
 cuda = use_extension("@rules_cuda//cuda:extensions.bzl", "toolchain")
 
-# Hermetic CUDA toolkit matching libtorch's cu129 build. Compile-time ONLY: it
-# supplies the CUDA headers reachable from train.h. Don't add these as link or
-# runtime deps -- libtorch bundles its own CUDA runtime (see libtorch.bzl), and
-# a second copy would clash.
+# Hermetic CUDA toolkit 13.0.2, matching libtorch's cu130 build. Unlike the old
+# cu129 setup, the cu130 libtorch zip no longer bundles the CUDA runtime, so
+# these are now *runtime* deps too (not headers-only): //third_party:cuda_runtime
+# links the toolkit .so that libtorch_cuda.so DT_NEEDEDs. cudnn/cusparseLt/nccl/
+# nvshmem aren't in the toolkit redist -- see the @cudnn/@cusparselt/@nccl/
+# @nvshmem http_archives below.
 cuda.redist_json(
     name = "cuda_redist",
     components = [
         "cccl",
-        "cublas",
-        "cudart",
-        "cusolver",
-        "cusparse",
+        "crt",  # required by the hermetic nvcc toolchain
+        "cublas",  # libcublas.so.13 + libcublasLt.so.13
+        "cudart",  # libcudart.so.13
+        "cufft",  # libcufft.so.12
+        "culibos",  # libculibos.a, split out of cudart in CUDA 13 (@cuda//:culibos_a)
+        "cupti",  # libcupti.so.13
+        "curand",  # libcurand.so.10
+        "cusolver",  # libcusolver.so.12
+        "cusparse",  # libcusparse.so.12
         "nvcc",
-        "nvrtc",
+        "nvvm",  # required by the hermetic nvcc toolchain (CUDA 13+)
+        "nvjitlink",  # libnvJitLink.so.13 (cublasLt dep)
+        "nvrtc",  # libnvrtc.so.13
         "nvtx",
     ],
-    version = "12.9.1",
+    version = "13.0.2",
 )
 cuda.toolkit(
     name = "cuda",
     toolkit_path = "",
 )
 use_repo(cuda, "cuda")
+
+# cuDNN / cuSPARSELt / NCCL / NVSHMEM: hard DT_NEEDED by libtorch_cuda.so but NOT
+# part of the CUDA toolkit redist, so rules_cuda can't provide them. (cufile IS in
+# the toolkit redist, but rules_cuda generates no target for it -- registry.bzl
+# maps "cufile" to [] -- so we fetch it the same way.) Pin the exact versions torch
+# 2.12.0+cu130 was built against (from the wheel's Requires-Dist). All are NVIDIA
+# redist .tar.xz except NCCL, which NVIDIA ships only as a wheel.
+http_archive(
+    name = "cufile",
+    urls = ["https://developer.download.nvidia.com/compute/cuda/redist/libcufile/linux-x86_64/libcufile-linux-x86_64-1.15.1.6-archive.tar.xz"],
+    strip_prefix = "libcufile-linux-x86_64-1.15.1.6-archive",
+    integrity = "sha256-LB9USrGw4hVZDZQ8vRsKGSoGbpt1kuYFwuKLIuiGaI8=",
+    build_file = "//third_party:cufile.BUILD",
+)
+http_archive(
+    name = "cudnn",
+    urls = ["https://developer.download.nvidia.com/compute/cudnn/redist/cudnn/linux-x86_64/cudnn-linux-x86_64-9.20.0.48_cuda13-archive.tar.xz"],
+    strip_prefix = "cudnn-linux-x86_64-9.20.0.48_cuda13-archive",
+    integrity = "sha256-c/CR7ldmjcGOixthgRwN3/LsC3Yu/mE+nyf56/1sIMA=",
+    build_file = "//third_party:cudnn.BUILD",
+)
+http_archive(
+    name = "cusparselt",
+    urls = ["https://developer.download.nvidia.com/compute/cusparselt/redist/libcusparse_lt/linux-x86_64/libcusparse_lt-linux-x86_64-0.8.1.1_cuda13-archive.tar.xz"],
+    strip_prefix = "libcusparse_lt-linux-x86_64-0.8.1.1_cuda13-archive",
+    integrity = "sha256-gt0+XrwZmicBH1iFeoDNgl53u6Y0qyKGuj1OExFduJo=",
+    build_file = "//third_party:cusparselt.BUILD",
+)
+http_archive(
+    name = "nccl",
+    urls = ["https://files.pythonhosted.org/packages/67/f4/58e4e91b6919367c7aafb8e36fce9aad1a3047e536bf7e2fd560927d3a4c/nvidia_nccl_cu13-2.29.7-py3-none-manylinux_2_18_x86_64.whl"],
+    type = "zip",  # a wheel is a zip; NVIDIA ships NCCL no other hermetic way
+    integrity = "sha256-7dgVOERnhuw7c5clQ+U7tDvK8L/I73bLZ5/MOQ/+E20=",
+    build_file = "//third_party:nccl.BUILD",
+)
+http_archive(
+    name = "nvshmem",
+    urls = ["https://developer.download.nvidia.com/compute/nvshmem/redist/libnvshmem/linux-x86_64/libnvshmem-linux-x86_64-3.4.5_cuda13-archive.tar.xz"],
+    strip_prefix = "libnvshmem-linux-x86_64-3.4.5_cuda13-archive",
+    integrity = "sha256-GPEoB8I7xbJwWBrx+br9VANp2ng+VXFxVYiHYj13hCw=",
+    build_file = "//third_party:nvshmem.BUILD",
+)
 
 # .bcr.2 carries the registry patches for Bazel 9 / rules_cc 0.2.x, dropping the
 # git_override.

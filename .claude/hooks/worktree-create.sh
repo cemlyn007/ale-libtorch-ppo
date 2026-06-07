@@ -23,7 +23,7 @@ git -C "$ROOT" worktree add -b "worktree-$NAME" "$DIR" origin/main >&2
 # Symlink shared untracked dirs. logs is ensured (so links never dangle);
 # the rest are linked only if they already exist in the main checkout.
 mkdir -p "$ROOT/logs"
-for d in logs roms results videos images; do
+for d in logs roms videos images; do
   [ -e "$ROOT/$d" ] || continue
   ln -sfn "$ROOT/$d" "$DIR/$d"
 done

@@ -13,35 +13,35 @@
 #include <yaml-cpp/yaml.h>
 
 struct Config {
-  size_t total_environments = 512;
-  size_t hidden_size = 512;
+  size_t total_environments;
+  size_t hidden_size;
   const size_t action_size = 4;
-  size_t horizon = 128;
-  size_t max_steps = 108000;
-  size_t frame_stack = 4;
-  double learning_rate = 2.5e-4;
-  float clip_param = 0.1f;
-  float value_loss_coef = 0.5f;
-  float entropy_coef = 0.01f;
-  long num_epochs = 1;
-  long mini_batch_size = 2048;
-  long num_mini_batches = 32;
-  float gae_discount = 0.99f;
-  float gae_lambda = 0.95f;
-  float max_gradient_norm = 0.5f;
-  size_t num_rollouts = 7000;
-  size_t num_workers = 16;
-  size_t worker_batch_size = 32;
-  size_t frame_skip = 4;
+  size_t horizon;
+  size_t max_steps;
+  size_t frame_stack;
+  double learning_rate;
+  float clip_param;
+  float value_loss_coef;
+  float entropy_coef;
+  long num_epochs;
+  long mini_batch_size;
+  long num_mini_batches;
+  float gae_discount;
+  float gae_lambda;
+  float max_gradient_norm;
+  size_t num_rollouts;
+  size_t num_workers;
+  size_t worker_batch_size;
+  size_t frame_skip;
   // Some games like breakout have a maximum return
   // which should be used to reset the environment.
-  float max_return = -1.0f;
+  float max_return;
   // It is faster to record using the observation.
   // However the observation may be in grayscale.
-  bool record_observation = false;
-  bool record_video = false;
-  bool cuda_graph = false;
-  bool deterministic = false;
+  bool record_observation;
+  bool record_video;
+  bool cuda_graph;
+  bool deterministic;
 };
 
 // The single place where YAML keys bind to Config members. Each field keeps its
@@ -95,8 +95,11 @@ Config load_config(const std::filesystem::path &path) {
   Config config;
   YAML::Node node = YAML::LoadFile(path.string());
   for_each_field(config, [&](const char *name, auto &field) {
-    // Default to the in-struct value when the key is absent.
-    field = node[name].as<std::decay_t<decltype(field)>>(field);
+    // Every key is required: a missing key is a hard error rather than a
+    // silent default.
+    if (!node[name])
+      throw std::runtime_error(std::string("Missing config key: ") + name);
+    field = node[name].as<std::decay_t<decltype(field)>>();
   });
   return config;
 }

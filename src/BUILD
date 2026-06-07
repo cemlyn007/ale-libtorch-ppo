@@ -4,6 +4,12 @@ package(default_visibility = ["//visibility:public"])
 
 
 cc_library(
+    name = "stop_signal",
+    hdrs = ["stop_signal.h"],
+    strip_include_prefix = "/src",
+)
+
+cc_library(
     name = "ai",
     strip_include_prefix = "/src",
     deps = [

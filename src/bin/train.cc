@@ -2,6 +2,7 @@
 #include "ai/ppo/losses.h"
 #include "ai/rollout.h"
 #include "ai/vision.h"
+#include "stop_signal.h"
 #include "tensorboard_logger.h"
 #include <ale/ale_interface.hpp>
 #include <ale/common/Log.hpp>
@@ -289,6 +290,8 @@ void enable_torch_determinism(uint64_t seed) {
 }
 
 int main(int argc, char **argv) {
+  stop_signal::StopSignal stop{SIGTERM, SIGINT};
+
   // ALE prints a per-environment ROM banner / seed line at Info level straight
   // to stderr (not via spdlog). Quieten it to Warning so the console only shows
   // our logs; genuine ALE warnings/errors still come through. Mode is a
@@ -405,6 +408,10 @@ int main(int argc, char **argv) {
   }
   for (size_t rollout_index = 0; rollout_index < config.num_rollouts;
        ++rollout_index) {
+    if (stop.requested()) {
+      spdlog::info("Stop requested — finalizing and shutting down...");
+      break;
+    }
     spdlog::info("Rollout {} of {}", rollout_index + 1, config.num_rollouts);
     auto lr = config.learning_rate *
               (1.0 - rollout_index / static_cast<double>(config.num_rollouts));
@@ -442,6 +449,7 @@ int main(int argc, char **argv) {
     auto profiler_result = torch::autograd::profiler::disableProfiler();
     profiler_result->save(profile_path);
   }
-  spdlog::info("Success");
+  // rollout's video recorder is finalized by RAII as this scope unwinds.
+  spdlog::info(stop.requested() ? "Interrupted" : "Success");
   return 0;
 }

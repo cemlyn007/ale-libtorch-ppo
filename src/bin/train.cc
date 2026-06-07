@@ -4,9 +4,10 @@
 #include "ai/vision.h"
 #include "tensorboard_logger.h"
 #include <ale/ale_interface.hpp>
+#include <ale/common/Log.hpp>
 #include <ale/version.hpp>
-#include <iostream>
 #include <numeric>
+#include <spdlog/spdlog.h>
 #include <torch/nn.h>
 #include <type_traits>
 #include <torch/torch.h>
@@ -288,6 +289,11 @@ void enable_torch_determinism(uint64_t seed) {
 }
 
 int main(int argc, char **argv) {
+  // ALE prints a per-environment ROM banner / seed line at Info level straight
+  // to stderr (not via spdlog). Quieten it to Warning so the console only shows
+  // our logs; genuine ALE warnings/errors still come through. Mode is a
+  // process-wide static, so this one call covers every worker's interface too.
+  ale::Logger::setMode(ale::Logger::Warning);
   const auto start_time =
       std::chrono::system_clock::now().time_since_epoch().count();
   const auto rom_path = std::filesystem::path(argv[1]);
@@ -305,10 +311,10 @@ int main(int argc, char **argv) {
   }
   torch::Device device(torch::kCPU);
   if (torch::cuda::is_available()) {
-    std::cout << "CUDA is available! Training on GPU." << std::endl;
+    spdlog::info("CUDA is available! Training on GPU.");
     device = torch::Device(torch::kCUDA);
   } else {
-    std::cout << "CUDA is not available! Training on CPU." << std::endl;
+    spdlog::warn("CUDA is not available! Training on CPU.");
   }
 #ifdef __APPLE__
   device = torch::Device(torch::kMPS);
@@ -399,8 +405,7 @@ int main(int argc, char **argv) {
   }
   for (size_t rollout_index = 0; rollout_index < config.num_rollouts;
        ++rollout_index) {
-    std::cout << "Rollout " << rollout_index + 1 << " of "
-              << config.num_rollouts << std::endl;
+    spdlog::info("Rollout {} of {}", rollout_index + 1, config.num_rollouts);
     auto lr = config.learning_rate *
               (1.0 - rollout_index / static_cast<double>(config.num_rollouts));
     static_cast<torch::optim::AdamOptions &>(
@@ -437,6 +442,6 @@ int main(int argc, char **argv) {
     auto profiler_result = torch::autograd::profiler::disableProfiler();
     profiler_result->save(profile_path);
   }
-  std::cout << "Success" << std::endl;
+  spdlog::info("Success");
   return 0;
 }

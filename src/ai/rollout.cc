@@ -9,6 +9,7 @@
 #include "ai/environment/truncate_on_episode_return.h"
 #include "ai/gae.h"
 #include <cassert>
+#include <spdlog/spdlog.h>
 
 namespace ai::rollout {
 
@@ -122,7 +123,7 @@ Rollout::Rollout(
 
   is_episode_start_cpu_.resize(total_environments_, true);
 
-  std::cout << "Creating " << num_workers << " worker threads." << std::endl;
+  spdlog::info("Creating {} worker threads.", num_workers);
   for (size_t i = 0; i < num_workers; ++i) {
     workers_.emplace_back(&Rollout::worker, this);
   }

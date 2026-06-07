@@ -6,9 +6,9 @@ module(
     version = "0.1.0",
 )
 
-bazel_dep(name = "protobuf", version = "31.1")
+bazel_dep(name = "protobuf", version = "33.4")
 
-bazel_dep(name = "rules_cc", version = "0.1.1")
+bazel_dep(name = "rules_cc", version = "0.2.19")
 bazel_dep(name = "rules_foreign_cc", version = "0.15.0")
 
 tools = use_extension("@rules_foreign_cc//foreign_cc:extensions.bzl", "tools")
@@ -26,12 +26,14 @@ http_archive(
     integrity = "sha256-K4eK4bf+u0mMerU1F5HG2YONwhS0gl7sDfG1O1i2qqM=",
 )
 
-bazel_dep(name = "platforms", version = "0.0.11")
+bazel_dep(name = "platforms", version = "1.0.0")
 
 bazel_dep(name = "tensorboard_logger")
 git_override(
     module_name = "tensorboard_logger",
-    commit = "f706838d41a19f328d89a1b2c7fdd92545894016",
+    # Bazel 9-compatible: loads proto/cc rules explicitly and declares its own
+    # rules_cc dep, so the old patch is no longer needed.
+    commit = "50889bf5c6502828a50a5a25edd2ca0b72f6f4cc",
     remote = "https://github.com/cemlyn007/tensorboard_logger.git",
 )
 
@@ -48,32 +50,46 @@ use_repo(libtorch_extension, "libtorch")
 bazel_dep(name = "hedron_compile_commands", dev_dependency = True)
 git_override(
     module_name = "hedron_compile_commands",
-    remote = "https://github.com/hedronvision/bazel-compile-commands-extractor.git",
-    commit = "4f28899228fb3ad0126897876f147ca15026151e",
-    patches = [
-        ":third_party/hedron_compile_commands.patch",
-    ],
+    # Bazel 9-compatible fork: loads its rules from @rules_python/@rules_cc and
+    # handles sourceless (parse_headers) compile actions, replacing our old patch.
+    remote = "https://github.com/helly25/bazel-compile-commands-extractor.git",
+    commit = "26a1ba52bd76aa3d95fa7278a9696d51f7946612",
 )
 
-bazel_dep(name = "yaml-cpp", version = "0.8.0")
+# 0.9.0 loads its rules via @rules_cc and includes <cstdint> itself, dropping
+# the autoload workaround and force-include patch.
+bazel_dep(name = "yaml-cpp", version = "0.9.0")
 
-bazel_dep(name = "rules_cuda")
-git_override(
-    module_name = "rules_cuda",
-    remote = "https://github.com/bazel-contrib/rules_cuda.git",
-    commit = "1bc391d927066ff35291186aa7a51d37f92f44f3",
-)
+# 0.3.0 is the first release compatible with rules_cc 0.2.x (gets CcInfo from
+# @rules_cc rather than the removed global symbol).
+bazel_dep(name = "rules_cuda", version = "0.3.0")
 
 cuda = use_extension("@rules_cuda//cuda:extensions.bzl", "toolchain")
+
+# Hermetic CUDA toolkit matching libtorch's cu124 build. Compile-time ONLY: it
+# supplies the CUDA headers reachable from train.h. Don't add these as link or
+# runtime deps -- libtorch bundles its own CUDA runtime (see libtorch.bzl), and
+# a second copy would clash.
+cuda.redist_json(
+    name = "cuda_redist",
+    components = [
+        "cccl",
+        "cublas",
+        "cudart",
+        "cusolver",
+        "cusparse",
+        "nvcc",
+        "nvrtc",
+        "nvtx",
+    ],
+    version = "12.4.1",
+)
 cuda.toolkit(
     name = "cuda",
     toolkit_path = "",
 )
 use_repo(cuda, "cuda")
 
-bazel_dep(name = "googletest", version = "1.17.0")
-git_override(
-    module_name = "googletest",
-    remote = "https://github.com/google/googletest.git",
-    commit = "35b75a2cba6ef72b7ce2b6b94b05c54ca07df866",
-)
+# .bcr.2 carries the registry patches for Bazel 9 / rules_cc 0.2.x, dropping the
+# git_override.
+bazel_dep(name = "googletest", version = "1.17.0.bcr.2")

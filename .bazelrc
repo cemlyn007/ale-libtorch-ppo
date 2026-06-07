@@ -1,7 +1,15 @@
 # Build options:
-build --action_env=BAZEL_CXXOPTS="-std=c++20"
+# Bazel 9 stopped forwarding --action_env=BAZEL_CXXOPTS to the cc toolchain, so
+# set the C++ standard explicitly for the target and host configs.
+build --cxxopt='-std=c++20'
+build --host_cxxopt='-std=c++20'
+# rules_foreign_cc's bundled pkg-config glib won't compile under GCC 15's C23
+# default (member named `bool`); pin its host C compiles to gnu17.
+build --host_conlyopt='-std=gnu17'
 build --cxxopt='-Wall'
 build --cxxopt='-Werror'
+# Don't hold third-party code to our -Werror (e.g. protobuf 33.4's own deprecated-API use).
+build --per_file_copt=external/.*@-Wno-error
 
 # Debug build specific options:
 build:dbg --action_env=CUDA_LAUNCH_BLOCKING=1

@@ -1,7 +1,7 @@
 """Module extension for "configuring" libtorch_bazel."""
 
 load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
-load("@local_config_platform//:constraints.bzl", "HOST_CONSTRAINTS")
+load("@platforms//host:constraints.bzl", "HOST_CONSTRAINTS")
 
 _INTEGRITIES = {
     # Generate with "sha256-$(curl -fsSL "$url" | sha256sum | cut -d' ' -f1 | xxd -r -p | base64)"
@@ -56,6 +56,23 @@ def _libtorch_configure_extension_impl(module_ctx):
         strip_prefix = "libtorch",
         url = _URLS.get(version).get(os),
         integrity = _INTEGRITIES.get(version).get(os),
+        # The vendored CUDA/OpenMP libs have auditwheel-hashed filenames (e.g.
+        # libcudart-e6b31d9c.so.12) but canonical sonames (libcudart.so.12).
+        # Anything we link records a DT_NEEDED on the canonical name, which
+        # exists nowhere in the distribution -- recreate the soname -> hashed-file
+        # symlinks (as a normal CUDA install would) so those entries resolve.
+        patch_cmds = [
+            """
+            for f in lib/*.so*; do
+                b=$(basename "$f")
+                [ -L "lib/$b" ] && continue
+                canon=$(printf '%s' "$b" | sed -E 's/-[0-9a-f]+(\\.so)/\\1/')
+                if [ "$canon" != "$b" ] && [ ! -e "lib/$canon" ]; then
+                    ln -s "$b" "lib/$canon"
+                fi
+            done
+            """,
+        ],
     )
     return module_ctx.extension_metadata(reproducible = True)
 

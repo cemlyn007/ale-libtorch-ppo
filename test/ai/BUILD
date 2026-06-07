@@ -1,3 +1,5 @@
+load("@rules_cc//cc:defs.bzl", "cc_test")
+
 googletest_copts = [
     "-Iexternal/gtest/googletest/include",
     "-Iexternal/gtest/googletest",

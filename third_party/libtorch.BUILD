@@ -1,25 +1,47 @@
+load("@rules_cc//cc:defs.bzl", "cc_library")
+
 package(
     default_visibility = ["//visibility:public"],
 )
+
+# libtorch's prebuilt shared libraries are linked with RPATH=$ORIGIN and find
+# each other (and the vendored CUDA/OpenMP libs) by sibling lookup. Since RPATH
+# isn't transitive, they must all share one runtime directory -- which Bazel
+# only guarantees when they're srcs of a single target. So every loadable lib
+# lives in this one cc_library; splitting into cc_imports or a data filegroup
+# would scatter them and break $ORIGIN resolution.
+#
+# The glob excludes what an app shouldn't link (static archives, the Python
+# bindings, the bundled test backends). The vendored libs have auditwheel-hashed
+# filenames but canonical sonames; libtorch.bzl recreates the canonical-soname
+# symlinks so our DT_NEEDED entries resolve.
 
 cc_library(
     name = "torch",
     srcs = select({
         "@platforms//os:linux": glob(
-            ["lib/*"],
-            exclude = [
-                "lib/libtorch_cpu.so",
-                "lib/libc10.so",
-                "lib/libnnapi_backend.so",
-                "lib/libnvrtc-builtins.so",
-                "lib/libtorch_python.so",
-                "lib/libprotobuf.a",
+            [
+                "lib/*.so",
+                "lib/*.so.*",
             ],
+            exclude = [
+                "lib/libtorch_python.so",
+                "lib/lib*_test.so",
+                # Android NNAPI backend; pulls in undefined CPython symbols.
+                "lib/libnnapi_backend.so",
+                # NVRTC's runtime-compiled builtins; dlopen'd by libnvrtc, not
+                # linked.
+                "lib/libnvrtc-builtins.so",
+            ],
+            # Empty on a macOS checkout; globs are evaluated regardless of the
+            # surrounding select, so allow no matches there.
+            allow_empty = True,
         ),
-        "@platforms//os:macos": ["lib/libtorch.dylib"],
+        "@platforms//os:macos": glob(["lib/*.dylib"], allow_empty = True),
         "//conditions:default": ["@platforms//:incompatible"],
     }),
     hdrs = glob([
+        "include/c10/**",
         "include/torch/**",
         "include/ATen/**",
     ]),
@@ -27,50 +49,4 @@ cc_library(
         "include",
         "include/torch/csrc/api/include",
     ],
-    deps = [
-        ":c10",
-        ":omp",
-        ":torch_cpu",
-    ],
-)
-
-cc_library(
-    name = "torch_cpu",
-    srcs = select({
-        "@platforms//os:linux": ["lib/libtorch_cpu.so"],
-        "@platforms//os:macos": ["lib/libtorch_cpu.dylib"],
-        "//conditions:default": ["@platforms//:incompatible"],
-    }),
-    hdrs = glob([
-        "include/torch/**",
-        "include/ATen/**",
-    ]),
-    includes = [
-        "include",
-        "include/torch/csrc/api/include",
-    ],
-    deps = [
-        ":c10",
-        ":omp",
-    ],
-)
-
-cc_import(
-    name = "c10",
-    hdrs = glob(["include/c10/**"]),
-    includes = ["include"],
-    shared_library = select({
-        "@platforms//os:linux": "lib/libc10.so",
-        "@platforms//os:macos": "lib/libc10.dylib",
-        "//conditions:default": "@platforms//:incompatible",
-    }),
-)
-
-cc_import(
-    name = "omp",
-    shared_library = select({
-        "@platforms//os:linux": "lib/libgomp-98b21ff3.so.1",
-        "@platforms//os:macos": "lib/libomp.dylib",
-        "//conditions:default": "@platforms//:incompatible",
-    }),
 )

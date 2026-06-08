@@ -18,10 +18,9 @@ struct Checkpoint {
 
 // Takes the model by its torch::nn::Module base rather than the concrete network
 // type so this stays decoupled from the architecture — callers pass `*network`.
-inline void save_checkpoint(const std::filesystem::path &path,
-                            const torch::nn::Module &network,
-                            const torch::optim::Adam &optimizer,
-                            const Checkpoint &state) {
+inline void save(const std::filesystem::path &path,
+                 const torch::nn::Module &network,
+                 const torch::optim::Adam &optimizer, const Checkpoint &state) {
   torch::serialize::OutputArchive archive;
   torch::serialize::OutputArchive model_archive;
   network.save(model_archive);
@@ -42,10 +41,10 @@ inline void save_checkpoint(const std::filesystem::path &path,
   std::filesystem::rename(tmp, path);
 }
 
-inline Checkpoint load_checkpoint(const std::filesystem::path &path,
-                                  torch::nn::Module &network,
-                                  torch::optim::Adam &optimizer,
-                                  const torch::Device &device) {
+inline Checkpoint load(const std::filesystem::path &path,
+                       torch::nn::Module &network,
+                       torch::optim::Adam &optimizer,
+                       const torch::Device &device) {
   torch::serialize::InputArchive archive;
   // Remap storages onto the current device so a CPU-saved checkpoint resumes on
   // GPU and vice versa. Module::load copies into the existing parameters in

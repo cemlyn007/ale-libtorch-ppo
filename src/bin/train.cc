@@ -373,8 +373,8 @@ int main(int argc, char **argv) {
   double best_return = -std::numeric_limits<double>::infinity();
   size_t step_offset = 0;
   if (!config.resume_from.empty()) {
-    const checkpoint::Checkpoint state = checkpoint::load_checkpoint(
-        config.resume_from, *network, optimizer, device);
+    const checkpoint::Checkpoint state =
+        checkpoint::load(config.resume_from, *network, optimizer, device);
     start_rollout_index = state.next_rollout_index;
     best_return = state.best_return;
     step_offset = state.global_step;
@@ -489,8 +489,8 @@ int main(int argc, char **argv) {
         const double rollout_return = mean(result.log.episode_returns);
         if (rollout_return > best_return) {
           best_return = rollout_return;
-          checkpoint::save_checkpoint(run_dir / "best.pt", *network, optimizer,
-                                      {rollout_index + 1, best_return, step});
+          checkpoint::save(run_dir / "best.pt", *network, optimizer,
+                           {rollout_index + 1, best_return, step});
           logger.add_text("checkpoint", step,
                           ("best.pt return=" + std::to_string(best_return) +
                            " rollout=" + std::to_string(rollout_index + 1))
@@ -498,8 +498,8 @@ int main(int argc, char **argv) {
         }
       }
       if ((rollout_index + 1) % config.checkpoint_interval == 0) {
-        checkpoint::save_checkpoint(run_dir / "latest.pt", *network, optimizer,
-                                    {rollout_index + 1, best_return, step});
+        checkpoint::save(run_dir / "latest.pt", *network, optimizer,
+                         {rollout_index + 1, best_return, step});
         logger.add_text(
             "checkpoint", step,
             ("latest.pt rollout=" + std::to_string(rollout_index + 1)).c_str());

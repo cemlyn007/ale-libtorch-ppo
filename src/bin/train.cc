@@ -8,6 +8,7 @@
 #include <ale/ale_interface.hpp>
 #include <ale/common/Log.hpp>
 #include <ale/version.hpp>
+#include <cstdlib>
 #include <numeric>
 #include <spdlog/spdlog.h>
 #include <torch/nn.h>
@@ -280,15 +281,21 @@ void enable_torch_determinism(uint64_t seed) {
   torch::globalContext().setDeterministicFillUninitializedMemory(true);
 }
 
-int main(int argc, char **argv) {
-  stop_signal::StopSignal stop{SIGTERM, SIGINT};
+// Everything the command line resolves for a run: the parsed paths, the chosen
+// group name, and the Config loaded from the --config YAML.
+struct Arguments {
+  std::filesystem::path rom_path;
+  std::filesystem::path log_path; // prefix; timestamp suffix appended in main()
+  std::filesystem::path profile_path;              // empty when --profile omitted
+  std::optional<std::filesystem::path> video_path; // set only when recording
+  std::string group_name;
+  Config config;
+};
 
-  // ALE prints a per-environment ROM banner / seed line at Info level straight
-  // to stderr (not via spdlog). Quieten it to Warning so the console only shows
-  // our logs; genuine ALE warnings/errors still come through. Mode is a
-  // process-wide static, so this one call covers every worker's interface too.
-  ale::Logger::setMode(ale::Logger::Warning);
-
+// Parse argv into Arguments. On --help or a malformed invocation, prints the
+// message and exits with CLI11's status code (this is why it can't return the
+// struct -- there is nothing sensible to return).
+Arguments parse_arguments(int argc, char **argv) {
   CLI::App app{"Train a PPO agent on an Atari ROM."};
   std::filesystem::path rom_path, log_path, config_path, video_dir, profile_path;
   std::string group_name;
@@ -310,23 +317,51 @@ int main(int argc, char **argv) {
                  "set in the config.");
   app.add_option("--profile", profile_path,
                  "Path to write a libtorch (Perfetto) profile to.");
-  CLI11_PARSE(app, argc, argv);
+  try {
+    app.parse(argc, argv);
+  } catch (const CLI::ParseError &e) {
+    std::exit(app.exit(e));
+  }
 
-  const auto start_time =
-      std::chrono::system_clock::now().time_since_epoch().count();
-  const auto logger_path = std::filesystem::path(log_path).replace_extension(
-      "tfevents." + std::to_string(start_time));
-  const auto config = load_config(config_path);
+  Config config = load_config(config_path);
   // --video-dir is only consumed when the config asks to record, but a missing
   // path then would silently disable recording -- fail loudly instead.
   if (config.record_video && video_dir.empty()) {
     spdlog::error("record_video is enabled but --video-dir was not provided.");
-    return 1;
+    std::exit(1);
   }
-  const std::optional<std::filesystem::path> video_path =
+  std::optional<std::filesystem::path> video_path =
       config.record_video
-          ? std::optional<std::filesystem::path>(video_dir)
+          ? std::optional<std::filesystem::path>(std::move(video_dir))
           : std::nullopt;
+
+  return Arguments{std::move(rom_path),     std::move(log_path),
+                   std::move(profile_path), std::move(video_path),
+                   std::move(group_name),   std::move(config)};
+}
+
+int main(int argc, char **argv) {
+  stop_signal::StopSignal stop{SIGTERM, SIGINT};
+
+  // ALE prints a per-environment ROM banner / seed line at Info level straight
+  // to stderr (not via spdlog). Quieten it to Warning so the console only shows
+  // our logs; genuine ALE warnings/errors still come through. Mode is a
+  // process-wide static, so this one call covers every worker's interface too.
+  ale::Logger::setMode(ale::Logger::Warning);
+
+  const Arguments args = parse_arguments(argc, argv);
+  const Config &config = args.config;
+  const std::filesystem::path &rom_path = args.rom_path;
+  const std::optional<std::filesystem::path> &video_path = args.video_path;
+  const std::filesystem::path &profile_path = args.profile_path;
+  const std::string &group_name = args.group_name;
+
+  const auto start_time =
+      std::chrono::system_clock::now().time_since_epoch().count();
+  const auto logger_path =
+      std::filesystem::path(args.log_path)
+          .replace_extension("tfevents." + std::to_string(start_time));
+
   torch::Device device(torch::kCPU);
   if (torch::cuda::is_available()) {
     spdlog::info("CUDA is available! Training on GPU.");

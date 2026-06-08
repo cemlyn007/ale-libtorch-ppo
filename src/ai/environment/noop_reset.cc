@@ -4,7 +4,8 @@ namespace ai::environment {
 
 NoopResetEnvironment::NoopResetEnvironment(
     std::unique_ptr<VirtualEnvironment> env, size_t max_noops, size_t seed)
-    : env_(std::move(env)), random_generator_(seed),
+    : env_(std::move(env)),
+      random_generator_(seed),
       distribution_(1, max_noops + 1) {}
 
 ScreenBuffer NoopResetEnvironment::reset() {
@@ -29,4 +30,4 @@ ale::ALEInterface &NoopResetEnvironment::get_interface() {
   return env_->get_interface();
 }
 
-} // namespace ai::environment
+}  // namespace ai::environment

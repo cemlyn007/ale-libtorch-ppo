@@ -1,12 +1,16 @@
 #include "buffer.h"
-#include "ai/gae.h"
+
 #include <torch/torch.h>
+
+#include "ai/gae.h"
 namespace ai::buffer {
 Buffer::Buffer(size_t total_environments, size_t capacity,
                std::vector<size_t> observation_shape, size_t action_size,
                const torch::Device &device)
-    : device_(device), total_environments_(total_environments),
-      capacity_(capacity), indices_(0) {
+    : device_(device),
+      total_environments_(total_environments),
+      capacity_(capacity),
+      indices_(0) {
   observation_shape_ =
       std::vector<int64_t>(observation_shape.begin(), observation_shape.end());
   std::vector<int64_t> buffer_observation_shape = {
@@ -75,4 +79,4 @@ Batch Buffer::get(const torch::Tensor &next_values, float discount,
       logits_,       values_,  advantages_, returns_};
   return batch;
 }
-} // namespace ai::buffer
+}  // namespace ai::buffer

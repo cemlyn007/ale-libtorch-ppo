@@ -54,4 +54,4 @@ ScreenBuffer Environment::get_observation() {
   return observation;
 }
 
-} // namespace ai::environment
+}  // namespace ai::environment

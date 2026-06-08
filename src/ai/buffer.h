@@ -25,7 +25,7 @@ struct Batch {
 };
 
 class Buffer {
-public:
+ public:
   Buffer(size_t total_environments, size_t capacity,
          std::vector<size_t> observation_shape, size_t action_size,
          const torch::Device &device);
@@ -38,7 +38,7 @@ public:
 
   Batch get(const torch::Tensor &next_values, float discount, float lambda);
 
-private:
+ private:
   torch::Device device_;
   size_t total_environments_;
   size_t capacity_;
@@ -57,4 +57,4 @@ private:
   torch::Tensor returns_;
 };
 
-} // namespace ai::buffer
+}  // namespace ai::buffer

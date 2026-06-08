@@ -28,4 +28,4 @@ ale::ALEInterface &TruncateOnEpisodeReturnEnvironment::get_interface() {
   return env_->get_interface();
 }
 
-} // namespace ai::environment
+}  // namespace ai::environment

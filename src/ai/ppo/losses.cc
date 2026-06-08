@@ -25,11 +25,10 @@ Metrics compute(const torch::Tensor &log_probabilities,
           masks.detach()};
 }
 
-ClippedSurrogateObjectivesResult
-clipped_surrogate_objectives(const torch::Tensor &log_probabilities,
-                             const torch::Tensor &old_log_probabilities,
-                             const torch::Tensor &advantages,
-                             float clip_param) {
+ClippedSurrogateObjectivesResult clipped_surrogate_objectives(
+    const torch::Tensor &log_probabilities,
+    const torch::Tensor &old_log_probabilities, const torch::Tensor &advantages,
+    float clip_param) {
   auto ratios = torch::exp(log_probabilities - old_log_probabilities);
   auto clipped_ratios =
       torch::clamp(ratios, 1.0 - clip_param, 1.0 + clip_param);
@@ -46,4 +45,4 @@ torch::Tensor normalize_logits(const torch::Tensor &logits) {
   return logits - torch::logsumexp(logits, -1, true);
 }
 
-} // namespace ai::ppo::losses
+}  // namespace ai::ppo::losses

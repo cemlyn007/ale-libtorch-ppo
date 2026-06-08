@@ -1,4 +1,9 @@
 #include "rollout.h"
+
+#include <spdlog/spdlog.h>
+
+#include <cassert>
+
 #include "ai/environment/episode_life.h"
 #include "ai/environment/episode_observation_recorder.h"
 #include "ai/environment/episode_recorder.h"
@@ -8,8 +13,6 @@
 #include "ai/environment/resize.h"
 #include "ai/environment/truncate_on_episode_return.h"
 #include "ai/gae.h"
-#include <cassert>
-#include <spdlog/spdlog.h>
 
 namespace ai::rollout {
 
@@ -21,8 +24,12 @@ Rollout::Rollout(
     size_t seed, size_t num_workers, size_t worker_batch_size,
     size_t frame_skip, ale::reward_t max_return,
     std::optional<std::filesystem::path> video_path, bool record_observation)
-    : gae_discount_(gae_discount), gae_lambda_(gae_lambda), rom_path_(rom_path),
-      height_(84), width_(84), buffer_([&] {
+    : gae_discount_(gae_discount),
+      gae_lambda_(gae_lambda),
+      rom_path_(rom_path),
+      height_(84),
+      width_(84),
+      buffer_([&] {
         ale::ALEInterface ale;
         ale.loadROM(rom_path);
         std::vector<size_t> observation_shape;
@@ -34,16 +41,25 @@ Rollout::Rollout(
                                   observation_shape,
                                   ale.getMinimalActionSet().size(), device);
       }()),
-      total_environments_(total_environments), horizon_(horizon),
-      frame_stack_(frame_stack), max_steps_(max_steps), is_terminated_(),
-      is_truncated_(), is_episode_start_(),
+      total_environments_(total_environments),
+      horizon_(horizon),
+      frame_stack_(frame_stack),
+      max_steps_(max_steps),
+      is_terminated_(),
+      is_truncated_(),
+      is_episode_start_(),
       game_overs_(total_environments, false),
       episode_returns_(total_environments, 0.0f),
       episode_lengths_(total_environments, 0),
       game_returns_(total_environments, 0.0f),
-      game_lengths_(total_environments, 0), action_selector_(action_selector),
-      device_(device), environments_(), stop_(), batch_size_(worker_batch_size),
-      grayscale_(grayscale), record_observation_(record_observation) {
+      game_lengths_(total_environments, 0),
+      action_selector_(action_selector),
+      device_(device),
+      environments_(),
+      stop_(),
+      batch_size_(worker_batch_size),
+      grayscale_(grayscale),
+      record_observation_(record_observation) {
   if (total_environments_ == 0) {
     throw std::invalid_argument("Total environments must be greater than 0.");
   }
@@ -95,8 +111,7 @@ Rollout::Rollout(
       environments_[i] = std::move(environment);
     });
   }
-  for (auto &thread : threads)
-    thread.join();
+  for (auto &thread : threads) thread.join();
 
   auto screen = environments_[0]->get_interface().getScreen();
   std::vector<int64_t> observation_shape;
@@ -174,12 +189,10 @@ Rollout::~Rollout() {
   std::vector<size_t> inputs(total_environments_);
   action_result_.actions.fill_(ale::Action::RANDOM);
   is_episode_start_cpu_.assign(total_environments_, true);
-  for (size_t i = 0; i < total_environments_; ++i)
-    inputs[i] = i;
+  for (size_t i = 0; i < total_environments_; ++i) inputs[i] = i;
   action_queue_.push(inputs);
   for (auto &worker : workers_)
-    if (worker.joinable())
-      worker.join();
+    if (worker.joinable()) worker.join();
 }
 
 void Rollout::update_observations() {
@@ -189,8 +202,7 @@ void Rollout::update_observations() {
         observations_.index({torch::indexing::Slice(), frame_index - 1}));
   for (size_t i = 0; i < total_environments_; ++i) {
     const auto &frame = screen_tensor_blobs_[i];
-    if (is_episode_start_cpu_[i])
-      observations_.select(0, i).copy_(frame, true);
+    if (is_episode_start_cpu_[i]) observations_.select(0, i).copy_(frame, true);
   }
   observations_.index_put_({torch::indexing::Slice(), 0},
                            torch::stack(screen_tensor_blobs_, 0));
@@ -203,7 +215,6 @@ RolloutResult Rollout::rollout() {
   std::vector<size_t> game_lengths;
 
   for (size_t time_index = 0; time_index < horizon_; time_index++) {
-
     // Action Selection
     action_result_ = action_selector_(observations_);
 
@@ -327,4 +338,4 @@ StepResult Rollout::step(const size_t environment_index) {
               observation.size());
   return output;
 }
-} // namespace ai::rollout
+}  // namespace ai::rollout

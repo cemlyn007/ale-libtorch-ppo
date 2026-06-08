@@ -1,20 +1,23 @@
 #include "ai/ppo/train.h"
-#include "ai/ppo/losses.h"
-#include "ai/rollout.h"
-#include "ai/vision.h"
-#include "stop_signal.h"
-#include "tensorboard_logger.h"
+
+#include <spdlog/spdlog.h>
+#include <torch/nn.h>
+#include <torch/torch.h>
+#include <yaml-cpp/yaml.h>
+
 #include <CLI/CLI.hpp>
 #include <ale/ale_interface.hpp>
 #include <ale/common/Log.hpp>
 #include <ale/version.hpp>
 #include <cstdlib>
 #include <numeric>
-#include <spdlog/spdlog.h>
-#include <torch/nn.h>
 #include <type_traits>
-#include <torch/torch.h>
-#include <yaml-cpp/yaml.h>
+
+#include "ai/ppo/losses.h"
+#include "ai/rollout.h"
+#include "ai/vision.h"
+#include "stop_signal.h"
+#include "tensorboard_logger.h"
 
 struct Config {
   size_t total_environments;
@@ -78,8 +81,8 @@ void for_each_field(Self &config, Visitor &&visit) {
   visit("deterministic", config.deterministic);
 }
 
-std::map<std::string, google::protobuf::Value>
-get_parameters(const Config &config, size_t action_size) {
+std::map<std::string, google::protobuf::Value> get_parameters(
+    const Config &config, size_t action_size) {
   std::map<std::string, google::protobuf::Value> hparams;
   auto put = [&](const char *name, const auto &field) {
     google::protobuf::Value value;
@@ -109,9 +112,9 @@ Config load_config(const std::filesystem::path &path) {
   return config;
 }
 
-template <typename T> float mean(const std::vector<T> &values) {
-  if (values.empty())
-    throw std::invalid_argument("Values vector is empty.");
+template <typename T>
+float mean(const std::vector<T> &values) {
+  if (values.empty()) throw std::invalid_argument("Values vector is empty.");
   return std::accumulate(values.begin(), values.end(), 0.0f) / values.size();
 }
 
@@ -130,7 +133,9 @@ void log_data(TensorBoardLogger &logger, const ai::rollout::Log &log,
               const ai::ppo::train::Metrics &metrics, double lr) {
   const auto step = log.steps;
   const auto &masks = metrics.masks;
-  auto scalar = [&](const char *tag, double v) { logger.add_scalar(tag, step, v); };
+  auto scalar = [&](const char *tag, double v) {
+    logger.add_scalar(tag, step, v);
+  };
   auto hist = [&](const char *tag, const auto &v) {
     logger.add_histogram(tag, step, v);
   };
@@ -157,9 +162,11 @@ void log_data(TensorBoardLogger &logger, const ai::rollout::Log &log,
     }
   }
 
-  scalar("mean_clipped_gradient", metrics.clipped_gradients.mean().item<float>());
+  scalar("mean_clipped_gradient",
+         metrics.clipped_gradients.mean().item<float>());
   scalar("mean_loss", metrics.loss.mean().item<float>());
-  scalar_and_hist("mean_clipped_loss", "clipped_losses", metrics.clipped_losses);
+  scalar_and_hist("mean_clipped_loss", "clipped_losses",
+                  metrics.clipped_losses);
   scalar_and_hist("mean_value_loss", "value_losses", metrics.value_losses);
   scalar_and_hist("mean_entropy", "entropies", metrics.entropies);
   scalar_and_hist("mean_ratio", "ratios", metrics.ratio);
@@ -247,10 +254,9 @@ ai::ppo::train::Batch prepare_batch(ai::buffer::Batch &batch) {
 }
 
 ai::ppo::train::Hyperparameters prepare_hyperparameters(const Config &config) {
-  ai::ppo::train::Hyperparameters hp = {config.clip_param,
-                                        config.value_loss_coef,
-                                        config.entropy_coef,
-                                        config.max_gradient_norm};
+  ai::ppo::train::Hyperparameters hp = {
+      config.clip_param, config.value_loss_coef, config.entropy_coef,
+      config.max_gradient_norm};
   return hp;
 }
 
@@ -281,23 +287,20 @@ void enable_torch_determinism(uint64_t seed) {
   torch::globalContext().setDeterministicFillUninitializedMemory(true);
 }
 
-// Everything the command line resolves for a run: the parsed paths, the chosen
-// group name, and the Config loaded from the --config YAML.
 struct Arguments {
   std::filesystem::path rom_path;
-  std::filesystem::path log_path; // prefix; timestamp suffix appended in main()
-  std::filesystem::path profile_path;              // empty when --profile omitted
-  std::optional<std::filesystem::path> video_path; // set only when recording
+  // Prefix; the timestamp + ".tfevents" suffix is appended in main().
+  std::filesystem::path log_path;
+  std::filesystem::path profile_path;  // empty when --profile omitted
+  std::optional<std::filesystem::path> video_path;  // set only when recording
   std::string group_name;
   Config config;
 };
 
-// Parse argv into Arguments. On --help or a malformed invocation, prints the
-// message and exits with CLI11's status code (this is why it can't return the
-// struct -- there is nothing sensible to return).
 Arguments parse_arguments(int argc, char **argv) {
   CLI::App app{"Train a PPO agent on an Atari ROM."};
-  std::filesystem::path rom_path, log_path, config_path, video_dir, profile_path;
+  std::filesystem::path rom_path, log_path, config_path, video_dir,
+      profile_path;
   std::string group_name;
   app.add_option("--rom", rom_path, "Atari ROM to train on.")
       ->required()
@@ -380,8 +383,7 @@ int main(int argc, char **argv) {
     std::filesystem::create_directories(video_path.value());
   }
 
-  if (config.deterministic)
-    enable_torch_determinism(42);
+  if (config.deterministic) enable_torch_determinism(42);
 
   // The action count is a property of the ROM, not a configured value: read it
   // from ALE's minimal action set (matching what the rollout buffer uses).
@@ -402,8 +404,8 @@ int main(int argc, char **argv) {
   ai::rollout::Rollout rollout(
       rom_path, config.total_environments, config.horizon, config.max_steps,
       config.frame_stack, true,
-      [&network, &device, action_size](
-          const torch::Tensor &obs) -> ai::rollout::ActionResult {
+      [&network, &device,
+       action_size](const torch::Tensor &obs) -> ai::rollout::ActionResult {
         network->eval();
         torch::NoGradGuard no_grad;
         auto observations = device.is_cuda() ? obs.to(torch::kFloat32) : obs;
@@ -479,8 +481,9 @@ int main(int argc, char **argv) {
       batch.copy_(b);
       ai::ppo::train::train_cuda_graph(graph);
 #else
-      TORCH_CHECK(false, "cuda_graph is only supported on Linux (__linux__ not "
-                         "defined). Set cuda_graph=false or run on Linux.");
+      TORCH_CHECK(false,
+                  "cuda_graph is only supported on Linux (__linux__ not "
+                  "defined). Set cuda_graph=false or run on Linux.");
 #endif
 
     } else {

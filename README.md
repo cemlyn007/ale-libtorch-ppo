@@ -29,15 +29,15 @@ To run the project, follow these steps:
 
 5. Train the agent using Bazel:
    ```shell
-   bazel run //src/bin:train --compilation_mode=opt -- $(pwd)/roms/breakout.bin $(pwd)/logs/train $(pwd)/videos/train train $(pwd)/configs/v0.yaml
+   bazel run //src/bin:train --compilation_mode=opt -- --rom $(pwd)/roms/breakout.bin --log-path $(pwd)/logs/train --video-dir $(pwd)/videos/train --group train --config $(pwd)/configs/v0.yaml
    ```
-   Or alternatively, with VS Code, you can run the tasks. The command line arguments do the following:
-   1. Specify which ROM to use.
-   2. Specify the run-name base for logs. A fresh run creates a per-run directory `<base>.<start_time>/` (e.g. `logs/train.<t>/`) holding its TensorBoard event file and checkpoints.
-   3. Specify the directory to write videos to.
-   4. Specify the group name used for logging parameters to TensorBoard.
-   5. Specify the path to the YAML file containing the config to use for running the application.
-   6. Optional: specify the location to write a libtorch profile to which can be examined using Perfetto.
+   Or alternatively, with VS Code, you can run the tasks. Pass `--help` to list every flag. The command line options do the following:
+   - `--rom`: Path to the Atari ROM to train on.
+   - `--log-path`: TensorBoard log path prefix; `.tfevents.<timestamp>` is appended at runtime.
+   - `--video-dir`: Directory to write videos to (required when `record_video` is set in the config).
+   - `--group`: Group name used when logging parameters to TensorBoard.
+   - `--config`: Path to the YAML file containing the config to use for running the application.
+   - `--profile`: Optional path to write a libtorch profile to, which can be examined using Perfetto.
 
 ### Checkpointing
 

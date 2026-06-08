@@ -1,11 +1,12 @@
 #pragma once
-#include <filesystem>
 #include <stdio.h>
+
+#include <filesystem>
 
 namespace ai::video_recorder {
 
 class VideoRecorder {
-public:
+ public:
   VideoRecorder(const std::filesystem::path &, size_t channels, size_t width,
                 size_t height, size_t fps = 30);
   ~VideoRecorder();
@@ -14,7 +15,7 @@ public:
   void write(const unsigned char *data);
   void close();
 
-private:
+ private:
   std::filesystem::path video_path_;
   size_t channels_;
   size_t width_;
@@ -23,4 +24,4 @@ private:
   std::string pixel_format_;
   FILE *ffmpeg_stream_ = nullptr;
 };
-} // namespace ai::video_recorder
+}  // namespace ai::video_recorder

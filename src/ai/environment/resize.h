@@ -1,18 +1,19 @@
 #pragma once
-#include "ai/environment/environment.h"
 #include <memory>
+
+#include "ai/environment/environment.h"
 
 namespace ai::environment {
 
 class ResizeEnvironment : public VirtualEnvironment {
-public:
+ public:
   explicit ResizeEnvironment(std::unique_ptr<VirtualEnvironment> env,
                              int new_width, int new_height);
   ScreenBuffer reset() override;
   Step step(const ale::Action &action) override;
   ale::ALEInterface &get_interface() override;
 
-private:
+ private:
   std::unique_ptr<VirtualEnvironment> env_;
   int width_;
   int height_;
@@ -22,4 +23,4 @@ private:
   ScreenBuffer resize(const ScreenBuffer &observation) const;
 };
 
-} // namespace ai::environment
+}  // namespace ai::environment

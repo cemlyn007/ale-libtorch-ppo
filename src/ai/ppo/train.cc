@@ -1,4 +1,5 @@
 #include "ai/ppo/train.h"
+
 #include <torch/torch.h>
 
 #ifdef __linux__
@@ -29,7 +30,7 @@ torch::Tensor clip_grad_norm_(const std::vector<torch::Tensor> &parameters,
   std::vector<torch::Tensor> norms;
   norms.reserve(params_with_grad.size());
 
-  const double norm_type = 2.0; // L2 norm
+  const double norm_type = 2.0;  // L2 norm
   for (const auto &param : params_with_grad) {
     norms.emplace_back(param.grad().data().norm(norm_type));
   }
@@ -56,4 +57,4 @@ void stream_sync(at::cuda::CUDAStream &dependency,
 void train_cuda_graph(at::cuda::CUDAGraph &graph) { graph.replay(); }
 #endif
 
-} // namespace ai::ppo::train
+}  // namespace ai::ppo::train

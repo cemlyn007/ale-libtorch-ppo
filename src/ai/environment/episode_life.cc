@@ -32,8 +32,7 @@ Step EpisodeLife::step(const ale::Action &action) {
   int new_lives = env_->get_interface().lives();
   bool life_lost = new_lives < lives_;
   result.terminated |= life_lost;
-  if (result.terminated)
-    result.truncated = false;
+  if (result.terminated) result.truncated = false;
   lives_ = new_lives;
   game_over_ = result.game_over;
   return result;
@@ -43,4 +42,4 @@ ale::ALEInterface &EpisodeLife::get_interface() {
   return env_->get_interface();
 }
 
-} // namespace ai::environment
+}  // namespace ai::environment

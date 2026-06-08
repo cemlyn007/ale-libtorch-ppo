@@ -5,10 +5,8 @@ namespace ai::environment {
 MaxAndSkipEnvironment::MaxAndSkipEnvironment(
     std::unique_ptr<VirtualEnvironment> env, size_t skip)
     : env_(std::move(env)), skip_(skip) {
-  if (!env_)
-    throw std::invalid_argument("Environment must not be null.");
-  if (skip_ == 0)
-    throw std::invalid_argument("Skip must be greater than 0.");
+  if (!env_) throw std::invalid_argument("Environment must not be null.");
+  if (skip_ == 0) throw std::invalid_argument("Skip must be greater than 0.");
 }
 
 ScreenBuffer MaxAndSkipEnvironment::reset() { return env_->reset(); }
@@ -48,4 +46,4 @@ ale::ALEInterface &MaxAndSkipEnvironment::get_interface() {
   return env_->get_interface();
 }
 
-} // namespace ai::environment
+}  // namespace ai::environment

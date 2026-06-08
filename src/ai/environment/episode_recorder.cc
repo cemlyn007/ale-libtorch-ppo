@@ -5,7 +5,9 @@ namespace ai::environment {
 EpisodeRecorder::EpisodeRecorder(std::unique_ptr<VirtualEnvironment> env,
                                  const std::filesystem::path &video_path,
                                  bool grayscale)
-    : env_(std::move(env)), grayscale_(grayscale), episode_index_(0),
+    : env_(std::move(env)),
+      grayscale_(grayscale),
+      episode_index_(0),
       buffer_([&]() {
         auto screen = env_->get_interface().getScreen();
         if (grayscale) {
@@ -36,8 +38,7 @@ Step EpisodeRecorder::step(const ale::Action &action) {
   auto result = env_->step(action);
   update_buffer();
   video_recorder_.write(buffer_.data());
-  if (result.terminated || result.truncated)
-    video_recorder_.close();
+  if (result.terminated || result.truncated) video_recorder_.close();
   return result;
 }
 
@@ -52,4 +53,4 @@ void EpisodeRecorder::update_buffer() {
     env_->get_interface().getScreenRGB(buffer_);
 }
 
-} // namespace ai::environment
+}  // namespace ai::environment

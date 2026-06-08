@@ -3,13 +3,14 @@
 #include <queue>
 
 namespace ai::queue {
-template <typename T> class Queue {
-private:
+template <typename T>
+class Queue {
+ private:
   std::queue<T> queue_;
   std::mutex mutex_;
   std::condition_variable condition_variable_;
 
-public:
+ public:
   void push(const T &item) {
     std::unique_lock<std::mutex> lock(mutex_);
     queue_.push(item);
@@ -18,8 +19,7 @@ public:
 
   void push(const std::vector<T> &items) {
     std::unique_lock<std::mutex> lock(mutex_);
-    for (const auto &item : items)
-      queue_.push(item);
+    for (const auto &item : items) queue_.push(item);
     condition_variable_.notify_all();
   }
 
@@ -43,4 +43,4 @@ public:
     return items;
   }
 };
-} // namespace ai::queue
+}  // namespace ai::queue

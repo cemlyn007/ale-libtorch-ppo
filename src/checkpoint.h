@@ -1,13 +1,14 @@
 #pragma once
+#include <torch/torch.h>
+
 #include <cstddef>
 #include <filesystem>
-#include <torch/torch.h>
 
 namespace checkpoint {
 
 // Everything needed to resume a run: model weights, optimizer moments, the next
-// rollout to run (so the LR schedule continues), and the best return seen so the
-// best.pt criterion survives a resume.
+// rollout to run (so the LR schedule continues), and the best return seen so
+// the best.pt criterion survives a resume.
 struct Checkpoint {
   size_t next_rollout_index;
   double best_return;
@@ -16,8 +17,9 @@ struct Checkpoint {
   size_t global_step;
 };
 
-// Takes the model by its torch::nn::Module base rather than the concrete network
-// type so this stays decoupled from the architecture — callers pass `*network`.
+// Takes the model by its torch::nn::Module base rather than the concrete
+// network type so this stays decoupled from the architecture — callers pass
+// `*network`.
 inline void save(const std::filesystem::path &path,
                  const torch::nn::Module &network,
                  const torch::optim::Adam &optimizer, const Checkpoint &state) {
@@ -64,4 +66,4 @@ inline Checkpoint load(const std::filesystem::path &path,
           best_return.toDouble(), static_cast<size_t>(global_step.toInt())};
 }
 
-} // namespace checkpoint
+}  // namespace checkpoint

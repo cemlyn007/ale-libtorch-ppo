@@ -1,6 +1,8 @@
 #include "checkpoint.h"
-#include "gtest/gtest.h"
+
 #include <torch/torch.h>
+
+#include "gtest/gtest.h"
 
 namespace {
 
@@ -25,13 +27,13 @@ void step_with_unit_grads(TinyNet &net, torch::optim::Adam &optimizer) {
   optimizer.step();
 }
 
-} // namespace
+}  // namespace
 
 // Gives each test its own scratch directory under the (Bazel-sandboxed) test
 // temp dir, created fresh and removed on teardown so checkpoints never leak or
 // collide between tests.
 class CheckpointTest : public ::testing::Test {
-protected:
+ protected:
   void SetUp() override {
     const auto *info = ::testing::UnitTest::GetInstance()->current_test_info();
     dir_ = std::filesystem::path(::testing::TempDir()) /
@@ -44,7 +46,7 @@ protected:
     return dir_ / name;
   }
 
-private:
+ private:
   std::filesystem::path dir_;
 };
 

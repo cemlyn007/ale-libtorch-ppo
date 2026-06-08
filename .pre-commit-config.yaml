@@ -1,14 +1,15 @@
-# Install once per clone:  pre-commit install
-# Run on demand:           pre-commit run --all-files
-# clang-format is pinned to v21.1.8 to match the clang-format 21 used locally,
-# so a manual `clang-format -i` and the hook produce identical output.
 repos:
-  - repo: https://github.com/pre-commit/mirrors-clang-format
-    rev: v21.1.8
+  - repo: local
     hooks:
-      - id: clang-format
-        types_or: [c, c++]
-  - repo: https://github.com/keith/pre-commit-buildifier
-    rev: 8.5.1.1
-    hooks:
-      - id: buildifier
+      - id: aspect_rules_lint
+        name: Format
+        language: system
+        entry: bazel run //:format
+        files: .*
+        pass_filenames: false
+      - id: test
+        name: test
+        language: system
+        entry: bazel test //...
+        files: .*
+        pass_filenames: false

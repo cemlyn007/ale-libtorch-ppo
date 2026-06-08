@@ -1,5 +1,6 @@
-#include "ai/ppo/losses.h"
 #include <torch/torch.h>
+
+#include "ai/ppo/losses.h"
 
 #ifdef __linux__
 #include <ATen/cuda/CUDAEvent.h>
@@ -112,9 +113,10 @@ torch::Tensor clip_grad_norm_(const std::vector<torch::Tensor> &parameters,
                               double max_norm);
 
 template <NetworkModel Network>
-MiniBatchUpdateResult
-mini_batch_update(Network &network, torch::optim::Optimizer &optimizer,
-                  const Batch &batch, Hyperparameters &hyperparameters) {
+MiniBatchUpdateResult mini_batch_update(Network &network,
+                                        torch::optim::Optimizer &optimizer,
+                                        const Batch &batch,
+                                        Hyperparameters &hyperparameters) {
   auto output = network->forward(batch.observations);
   auto log_probabilities = ai::ppo::losses::normalize_logits(output.logits);
   auto ppo_metrics = ai::ppo::losses::compute(
@@ -168,7 +170,6 @@ void capture_train_cuda_graph(at::cuda::CUDAGraph &graph, Network &network,
                               size_t num_mini_batches,
                               Hyperparameters &hyperparameters,
                               int num_warmup_iters) {
-
   auto warmup_stream = at::cuda::getStreamFromPool();
   auto capture_stream = at::cuda::getStreamFromPool();
   auto legacy_stream = at::cuda::getCurrentCUDAStream();
@@ -197,4 +198,4 @@ void capture_train_cuda_graph(at::cuda::CUDAGraph &graph, Network &network,
 void train_cuda_graph(at::cuda::CUDAGraph &graph);
 #endif
 
-} // namespace ai::ppo::train
+}  // namespace ai::ppo::train

@@ -1,10 +1,12 @@
-#include "ai/buffer.h"
-#include "ai/environment/environment.h"
-#include "ai/queue.h"
+#include <torch/torch.h>
+
 #include <atomic>
 #include <filesystem>
 #include <functional>
-#include <torch/torch.h>
+
+#include "ai/buffer.h"
+#include "ai/environment/environment.h"
+#include "ai/queue.h"
 
 namespace ai::rollout {
 
@@ -37,7 +39,7 @@ struct StepResult {
 };
 
 class Rollout {
-public:
+ public:
   Rollout(std::filesystem::path rom_path, size_t total_environments,
           size_t horizon, size_t max_steps, size_t frame_stack, bool grayscale,
           std::function<ActionResult(const torch::Tensor &)> action_selector,
@@ -53,7 +55,7 @@ public:
   float gae_discount_ = 0.99f;
   float gae_lambda_ = 0.95f;
 
-private:
+ private:
   std::unique_ptr<ai::environment::VirtualEnvironment> create_environment(
       size_t i, size_t seed, size_t frame_skip, ale::reward_t max_return,
       const std::optional<std::filesystem::path> &video_path) const;
@@ -102,4 +104,4 @@ private:
   ActionResult action_result_;
 };
 
-} // namespace ai::rollout
+}  // namespace ai::rollout

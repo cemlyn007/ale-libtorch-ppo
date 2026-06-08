@@ -1,12 +1,13 @@
 #pragma once
+#include <memory>
+
 #include "ai/environment/environment.h"
 #include "ai/video_recorder.h"
-#include <memory>
 
 namespace ai::environment {
 
 class EpisodeRecorder : public VirtualEnvironment {
-public:
+ public:
   explicit EpisodeRecorder(std::unique_ptr<VirtualEnvironment> env,
                            const std::filesystem::path &video_path,
                            bool grayscale);
@@ -14,7 +15,7 @@ public:
   Step step(const ale::Action &action) override;
   ale::ALEInterface &get_interface() override;
 
-private:
+ private:
   std::unique_ptr<VirtualEnvironment> env_;
   bool grayscale_;
   size_t episode_index_;
@@ -24,4 +25,4 @@ private:
   void update_buffer();
 };
 
-} // namespace ai::environment
+}  // namespace ai::environment

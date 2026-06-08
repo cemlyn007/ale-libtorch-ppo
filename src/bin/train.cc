@@ -306,11 +306,6 @@ int main(int argc, char **argv) {
       std::chrono::system_clock::now().time_since_epoch().count();
   const auto rom_path = std::filesystem::path(argv[1]);
   const auto config = load_config(std::filesystem::path(argv[5]));
-  // A run is a self-contained directory holding its event file and checkpoints.
-  // A fresh run gets a new directory keyed by start_time. Resuming reuses the
-  // directory that holds the checkpoint, so TensorBoard merges the new event
-  // file into the same run and (with the restored global step) the metric
-  // curves continue rather than restarting.
   const std::filesystem::path run_dir =
       config.resume_from.empty()
           ? std::filesystem::path(argv[2]).parent_path() /

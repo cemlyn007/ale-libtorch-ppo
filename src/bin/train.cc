@@ -126,70 +126,63 @@ template <typename T> float mean(const std::vector<T> &values) {
   return std::accumulate(values.begin(), values.end(), 0.0f) / values.size();
 }
 
-float mean(const torch::Tensor &tensor, const torch::Tensor &mask) {
-  auto masked_tensor = tensor.masked_select(mask);
-  return masked_tensor.mean().item<float>();
-}
-
-std::vector<float> gather(const torch::Tensor &tensor,
-                          const torch::Tensor &mask) {
-  auto t =
-      tensor.masked_select(mask).contiguous().to(torch::kCPU, torch::kFloat);
-  float *data_ptr = t.data_ptr<float>();
-  return std::vector<float>(data_ptr, data_ptr + t.numel());
-}
-
 std::vector<float> to_vector(const torch::Tensor &tensor) {
   auto t = tensor.contiguous().to(torch::kCPU, torch::kFloat);
   float *data_ptr = t.data_ptr<float>();
   return std::vector<float>(data_ptr, data_ptr + t.numel());
 }
 
+std::vector<float> gather(const torch::Tensor &tensor,
+                          const torch::Tensor &mask) {
+  return to_vector(tensor.masked_select(mask));
+}
+
 // `step` is the absolute global env step (log.steps offset by any resumed run's
 // starting step) so a resumed run's curves continue rather than restart at 0.
 void log_data(TensorBoardLogger &logger, const ai::rollout::Log &log,
               const ai::ppo::train::Metrics &metrics, double lr, size_t step) {
-  if (!log.episode_returns.empty()) {
-    logger.add_scalar("mean_episode_return", step, mean(log.episode_returns));
-    logger.add_scalar("mean_episode_length", step, mean(log.episode_lengths));
-    logger.add_histogram("episode_returns", step, log.episode_returns);
-    logger.add_histogram("episode_lengths", step, log.episode_lengths);
+  const auto &masks = metrics.masks;
+  auto scalar = [&](const char *tag, double v) { logger.add_scalar(tag, step, v); };
+  auto hist = [&](const char *tag, const auto &v) {
+    logger.add_histogram(tag, step, v);
+  };
+  auto g = [&](const torch::Tensor &t) { return gather(t, masks); };
+  // Gather once on the host, then log both the mean and the distribution from
+  // the same vector — avoids a second masked_select + device sync per tensor.
+  auto scalar_and_hist = [&](const char *mean_tag, const char *hist_tag,
+                             const torch::Tensor &t) {
+    auto v = g(t);
+    scalar(mean_tag, mean(v));
+    hist(hist_tag, v);
+  };
 
+  if (!log.episode_returns.empty()) {
+    scalar("mean_episode_return", mean(log.episode_returns));
+    scalar("mean_episode_length", mean(log.episode_lengths));
+    hist("episode_returns", log.episode_returns);
+    hist("episode_lengths", log.episode_lengths);
     if (!log.game_returns.empty()) {
-      logger.add_scalar("mean_game_return", step, mean(log.game_returns));
-      logger.add_scalar("mean_game_length", step, mean(log.game_lengths));
-      logger.add_histogram("game_returns", step, log.game_returns);
-      logger.add_histogram("game_lengths", step, log.game_lengths);
+      scalar("mean_game_return", mean(log.game_returns));
+      scalar("mean_game_length", mean(log.game_lengths));
+      hist("game_returns", log.game_returns);
+      hist("game_lengths", log.game_lengths);
     }
   }
-  logger.add_scalar("mean_clipped_gradient", step,
-                    metrics.clipped_gradients.mean().item<float>());
-  logger.add_scalar("mean_loss", step, metrics.loss.mean().item<float>());
-  logger.add_scalar("mean_clipped_loss", step,
-                    mean(metrics.clipped_losses, metrics.masks));
-  logger.add_scalar("mean_value_loss", step,
-                    mean(metrics.value_losses, metrics.masks));
-  logger.add_scalar("mean_entropy", step,
-                    mean(metrics.entropies, metrics.masks));
-  logger.add_scalar("mean_ratio", step, mean(metrics.ratio, metrics.masks));
-  if (metrics.clipped_gradients.numel() > 1)
-    logger.add_histogram("clipped_gradients", step,
-                         to_vector(metrics.clipped_gradients));
-  logger.add_histogram("losses", step,
-                       gather(metrics.total_losses, metrics.masks));
-  logger.add_histogram("clipped_losses", step,
-                       gather(metrics.clipped_losses, metrics.masks));
-  logger.add_histogram("value_losses", step,
-                       gather(metrics.value_losses, metrics.masks));
-  logger.add_histogram("entropies", step,
-                       gather(metrics.entropies, metrics.masks));
-  logger.add_histogram("ratios", step, gather(metrics.ratio, metrics.masks));
-  logger.add_histogram("advantages", step,
-                       gather(metrics.advantages, metrics.masks));
-  logger.add_histogram("returns", step,
-                       gather(metrics.returns, metrics.masks));
 
-  logger.add_scalar("learning_rate", step, lr);
+  scalar("mean_clipped_gradient", metrics.clipped_gradients.mean().item<float>());
+  scalar("mean_loss", metrics.loss.mean().item<float>());
+  scalar_and_hist("mean_clipped_loss", "clipped_losses", metrics.clipped_losses);
+  scalar_and_hist("mean_value_loss", "value_losses", metrics.value_losses);
+  scalar_and_hist("mean_entropy", "entropies", metrics.entropies);
+  scalar_and_hist("mean_ratio", "ratios", metrics.ratio);
+
+  if (metrics.clipped_gradients.numel() > 1)
+    hist("clipped_gradients", to_vector(metrics.clipped_gradients));
+  hist("losses", g(metrics.total_losses));
+  hist("advantages", g(metrics.advantages));
+  hist("returns", g(metrics.returns));
+
+  scalar("learning_rate", lr);
 }
 
 torch::nn::Conv2d layer_init(torch::nn::Conv2d layer,

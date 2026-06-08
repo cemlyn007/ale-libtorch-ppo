@@ -25,10 +25,10 @@ Metrics compute(const torch::Tensor &log_probabilities,
                 const torch::Tensor &masks, float clip_param,
                 float value_loss_coef, float entropy_coef);
 
-ClippedSurrogateObjectivesResult
-clipped_surrogate_objectives(const torch::Tensor &log_probabilities,
-                             const torch::Tensor &log_old_probabilities,
-                             const torch::Tensor &advantages, float clip_param);
+ClippedSurrogateObjectivesResult clipped_surrogate_objectives(
+    const torch::Tensor &log_probabilities,
+    const torch::Tensor &log_old_probabilities, const torch::Tensor &advantages,
+    float clip_param);
 
 // Requires log probabilities.
 torch::Tensor compute_entropies(const torch::Tensor &);
@@ -36,4 +36,4 @@ torch::Tensor compute_entropies(const torch::Tensor &);
 // Accepts unnormalized logits.
 torch::Tensor normalize_logits(const torch::Tensor &);
 
-} // namespace ai::ppo::losses
+}  // namespace ai::ppo::losses

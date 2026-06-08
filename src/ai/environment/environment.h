@@ -18,7 +18,7 @@ struct Step {
 };
 
 class VirtualEnvironment {
-public:
+ public:
   virtual ~VirtualEnvironment() = default;
   virtual ScreenBuffer reset() = 0;
   virtual Step step(const ale::Action &action) = 0;
@@ -26,18 +26,18 @@ public:
 };
 
 class Environment : public VirtualEnvironment {
-public:
+ public:
   Environment(const std::filesystem::path &rom_path,
               size_t max_num_frames_per_episode, bool grayscale, int seed);
   ScreenBuffer reset() override;
   Step step(const ale::Action &action) override;
   ale::ALEInterface &get_interface() override;
 
-private:
+ private:
   ale::ALEInterface ale_;
   const bool grayscale_;
   const size_t size_;
   ScreenBuffer get_observation();
 };
 
-} // namespace ai::environment
+}  // namespace ai::environment

@@ -23,4 +23,4 @@ Step FireReset::step(const ale::Action &action) { return env_->step(action); }
 
 ale::ALEInterface &FireReset::get_interface() { return env_->get_interface(); }
 
-} // namespace ai::environment
+}  // namespace ai::environment

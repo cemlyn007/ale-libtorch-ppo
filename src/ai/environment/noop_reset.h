@@ -1,22 +1,23 @@
 #pragma once
-#include "ai/environment/environment.h"
 #include <memory>
 #include <random>
+
+#include "ai/environment/environment.h"
 
 namespace ai::environment {
 
 class NoopResetEnvironment : public VirtualEnvironment {
-public:
+ public:
   explicit NoopResetEnvironment(std::unique_ptr<VirtualEnvironment> env,
                                 size_t max_noops, size_t seed);
   ScreenBuffer reset() override;
   Step step(const ale::Action &action) override;
   ale::ALEInterface &get_interface() override;
 
-private:
+ private:
   std::unique_ptr<VirtualEnvironment> env_;
   std::mt19937 random_generator_;
   std::uniform_int_distribution<size_t> distribution_;
 };
 
-} // namespace ai::environment
+}  // namespace ai::environment

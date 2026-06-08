@@ -1,11 +1,13 @@
 #include "ai/environment/environment.h"
-#include "gtest/gtest.h"
+
 #include <ale/ale_interface.hpp>
 #include <cstdlib>
 #include <filesystem>
 
+#include "gtest/gtest.h"
+
 class EnvironmentTest : public ::testing::Test {
-protected:
+ protected:
   void SetUp() override {
     const char *test_srcdir = std::getenv("TEST_SRCDIR");
     GTEST_ASSERT_TRUE(test_srcdir != nullptr)

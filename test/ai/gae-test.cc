@@ -1,7 +1,10 @@
 #include "ai/gae.h"
-#include "gtest/gtest.h"
+
 #include <torch/torch.h>
+
 #include <vector>
+
+#include "gtest/gtest.h"
 
 TEST(GAETest, SimpleNoTerminalsNoTruncations) {
   // 1 env, 3 steps, no terminals, no truncations, no episode_starts
@@ -151,10 +154,10 @@ TEST(GAETest, MultipleEnvironments) {
   torch::Tensor values = torch::tensor({{0.5, 0.5, 0.5}, {0.3, 0.3, 0.3}});
   torch::Tensor next_values = torch::tensor({0.5, 0.3});
   torch::Tensor terminals = torch::zeros({2, 3}, torch::kBool);
-  terminals.index_put_({1, 2}, true); // Terminal at last step for env 2
+  terminals.index_put_({1, 2}, true);  // Terminal at last step for env 2
   torch::Tensor truncations = torch::zeros({2, 3}, torch::kBool);
   torch::Tensor episode_starts = torch::zeros({2, 3}, torch::kBool);
-  episode_starts.index_put_({0, 1}, true); // Episode start at step 1 for env 1
+  episode_starts.index_put_({0, 1}, true);  // Episode start at step 1 for env 1
   float gamma = 0.99;
   float lambda = 0.95;
   torch::Tensor advantages = torch::zeros({2, 3});
@@ -209,11 +212,11 @@ TEST(GAETest, MixedStateFlags) {
   torch::Tensor values = torch::tensor({{0.5, 0.5, 0.5, 0.5, 0.5}});
   torch::Tensor next_values = torch::tensor({0.5});
   torch::Tensor terminals = torch::zeros({1, 5}, torch::kBool);
-  terminals.index_put_({0, 2}, true); // Terminal at middle step
+  terminals.index_put_({0, 2}, true);  // Terminal at middle step
   torch::Tensor truncations = torch::zeros({1, 5}, torch::kBool);
-  truncations.index_put_({0, 4}, true); // Truncation at end
+  truncations.index_put_({0, 4}, true);  // Truncation at end
   torch::Tensor episode_starts = torch::zeros({1, 5}, torch::kBool);
-  episode_starts.index_put_({0, 3}, true); // New episode after terminal
+  episode_starts.index_put_({0, 3}, true);  // New episode after terminal
   float gamma = 0.99;
   float lambda = 0.95;
   torch::Tensor advantages = torch::zeros({1, 5});

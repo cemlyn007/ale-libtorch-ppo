@@ -1,6 +1,8 @@
 #include "ai/vision.h"
-#include "gtest/gtest.h"
+
 #include <torch/torch.h>
+
+#include "gtest/gtest.h"
 
 TEST(VisionTest, ResizeGrayscaleImage) {
   torch::Tensor input = torch::ones({210, 160}, torch::kFloat32);

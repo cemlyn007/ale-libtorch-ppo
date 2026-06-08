@@ -1,7 +1,10 @@
 #include "ai/vision.h"
-#include "stb_image_resize2.h"
-#include <array>
+
 #include <torch/torch.h>
+
+#include <array>
+
+#include "stb_image_resize2.h"
 
 namespace ai::vision {
 
@@ -19,8 +22,8 @@ torch::Tensor resize_grayscale_image(const torch::Tensor &image) {
   return out.reshape({84, 84});
 }
 
-torch::Tensor
-resize_frame_stacked_grayscale_images(const torch::Tensor &images) {
+torch::Tensor resize_frame_stacked_grayscale_images(
+    const torch::Tensor &images) {
   assert(images.dim() == 4);
   const auto batch_size = images.size(0);
   const auto frame_stack = images.size(1);
@@ -68,8 +71,8 @@ const torch::Tensor &get_grayscale_weights(torch::Device device) {
 // [batch_size, frame_stack, channels, height, width].
 // Returns a 4D tensor with shape
 // [batch_size, frame_stack, height, width].
-torch::Tensor
-rgb_to_grayscale_frame_stacked_images(const torch::Tensor &images) {
+torch::Tensor rgb_to_grayscale_frame_stacked_images(
+    const torch::Tensor &images) {
   assert(images.dim() == 5);
   assert(images.size(2) == 3);
   assert(images.size(3) == 84);
@@ -83,9 +86,9 @@ rgb_to_grayscale_frame_stacked_images(const torch::Tensor &images) {
   return grayscale_images;
 }
 
-std::vector<unsigned char>
-resize_grayscale_image(const std::vector<unsigned char> &image, int width,
-                       int height, int new_width, int new_height) {
+std::vector<unsigned char> resize_grayscale_image(
+    const std::vector<unsigned char> &image, int width, int height,
+    int new_width, int new_height) {
   assert(image.size() == static_cast<size_t>(width * height));
   std::vector<unsigned char> resized_image(new_width * new_height);
   stbir_resize_uint8_linear(image.data(), width, height, 0,
@@ -94,4 +97,4 @@ resize_grayscale_image(const std::vector<unsigned char> &image, int width,
   return resized_image;
 }
 
-} // namespace ai::vision
+}  // namespace ai::vision

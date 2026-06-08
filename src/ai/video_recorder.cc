@@ -1,4 +1,5 @@
 #include "video_recorder.h"
+
 #include <filesystem>
 #include <stdexcept>
 
@@ -7,8 +8,11 @@ namespace ai::video_recorder {
 VideoRecorder::VideoRecorder(const std::filesystem::path &video_path,
                              size_t channels, size_t width, size_t height,
                              size_t fps)
-    : video_path_(video_path), channels_(channels), width_(width),
-      height_(height), fps_(fps) {
+    : video_path_(video_path),
+      channels_(channels),
+      width_(width),
+      height_(height),
+      fps_(fps) {
   if (channels_ == 1)
     pixel_format_ = "gray";
   else if (channels_ == 3)
@@ -22,7 +26,8 @@ VideoRecorder::VideoRecorder(const std::filesystem::path &video_path,
 VideoRecorder::~VideoRecorder() {
   if (ffmpeg_stream_) {
     // Best-effort finalize: send EOF and reap ffmpeg so it writes the mp4
-    // trailer. Never throw from a destructor (this runs during rollout teardown).
+    // trailer. Never throw from a destructor (this runs during rollout
+    // teardown).
     pclose(ffmpeg_stream_);
     ffmpeg_stream_ = nullptr;
   }
@@ -60,4 +65,4 @@ void VideoRecorder::close() {
   ffmpeg_stream_ = nullptr;
 }
 
-} // namespace ai::video_recorder
+}  // namespace ai::video_recorder

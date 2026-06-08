@@ -21,16 +21,19 @@ void gae(torch::Tensor &advantages, const torch::Tensor &rewards,
   }
   auto expected_device = advantages.device();
   if (rewards.device() != expected_device) {
-    throw std::invalid_argument("Rewards tensor must be on the same device as "
-                                "advantages tensor.");
+    throw std::invalid_argument(
+        "Rewards tensor must be on the same device as "
+        "advantages tensor.");
   }
   if (values.device() != expected_device) {
-    throw std::invalid_argument("Values tensor must be on the same device as "
-                                "advantages tensor.");
+    throw std::invalid_argument(
+        "Values tensor must be on the same device as "
+        "advantages tensor.");
   }
   if (next_values.device() != expected_device) {
-    throw std::invalid_argument("Next values tensor must be on the same device "
-                                "as advantages tensor.");
+    throw std::invalid_argument(
+        "Next values tensor must be on the same device "
+        "as advantages tensor.");
   }
   if (terminals.device() != expected_device) {
     throw std::invalid_argument(
@@ -38,19 +41,22 @@ void gae(torch::Tensor &advantages, const torch::Tensor &rewards,
         "advantages tensor.");
   }
   if (truncations.device() != expected_device) {
-    throw std::invalid_argument("Truncations tensor must be on the same device "
-                                "as advantages tensor.");
+    throw std::invalid_argument(
+        "Truncations tensor must be on the same device "
+        "as advantages tensor.");
   }
   if (episode_starts.device() != expected_device) {
-    throw std::invalid_argument("Episode starts tensor must be on the same "
-                                "device as advantages tensor.");
+    throw std::invalid_argument(
+        "Episode starts tensor must be on the same "
+        "device as advantages tensor.");
   }
 
   auto state_events = episode_starts.to(torch::kInt) +
                       terminals.to(torch::kInt) + truncations.to(torch::kInt);
   if ((state_events > 1).any().item<bool>())
-    throw std::invalid_argument("Episode starts, terminals, and truncations "
-                                "must be mutually exclusive.");
+    throw std::invalid_argument(
+        "Episode starts, terminals, and truncations "
+        "must be mutually exclusive.");
 
   auto total_environments = rewards.size(0);
   auto num_steps = rewards.size(1);
@@ -79,4 +85,4 @@ void gae(torch::Tensor &advantages, const torch::Tensor &rewards,
   }
 }
 
-} // namespace ai::gae
+}  // namespace ai::gae

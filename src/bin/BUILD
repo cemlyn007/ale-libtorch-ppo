@@ -16,6 +16,7 @@ cc_binary(
         "//src:ai",
         "//src:stop_signal",
         "@arcade_learning_environment//:ale",
+        "@cli11//:cli11",
         "@libtorch//:torch",
         "@spdlog",
         "@tensorboard_logger",

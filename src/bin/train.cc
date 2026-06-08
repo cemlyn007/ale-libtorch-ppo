@@ -5,9 +5,11 @@
 #include <torch/torch.h>
 #include <yaml-cpp/yaml.h>
 
+#include <CLI/CLI.hpp>
 #include <ale/ale_interface.hpp>
 #include <ale/common/Log.hpp>
 #include <ale/version.hpp>
+#include <cstdlib>
 #include <numeric>
 #include <type_traits>
 
@@ -285,6 +287,62 @@ void enable_torch_determinism(uint64_t seed) {
   torch::globalContext().setDeterministicFillUninitializedMemory(true);
 }
 
+struct Arguments {
+  std::filesystem::path rom_path;
+  // Prefix; the timestamp + ".tfevents" suffix is appended in main().
+  std::filesystem::path log_path;
+  std::filesystem::path profile_path;  // empty when --profile omitted
+  std::optional<std::filesystem::path> video_path;  // set only when recording
+  std::string group_name;
+  Config config;
+};
+
+Arguments parse_arguments(int argc, char **argv) {
+  CLI::App app{"Train a PPO agent on an Atari ROM."};
+  std::filesystem::path rom_path, log_path, config_path, video_dir,
+      profile_path;
+  std::string group_name;
+  app.add_option("--rom", rom_path, "Atari ROM to train on.")
+      ->required()
+      ->check(CLI::ExistingFile);
+  app.add_option("--config", config_path, "YAML config file.")
+      ->required()
+      ->check(CLI::ExistingFile);
+  app.add_option("--log-path", log_path,
+                 "TensorBoard log path prefix; '.tfevents.<timestamp>' is "
+                 "appended at runtime.")
+      ->required();
+  app.add_option("--group", group_name,
+                 "Group name for hyperparameters logged to TensorBoard.")
+      ->required();
+  app.add_option("--video-dir", video_dir,
+                 "Directory to write videos to. Required when record_video is "
+                 "set in the config.");
+  app.add_option("--profile", profile_path,
+                 "Path to write a libtorch (Perfetto) profile to.");
+  try {
+    app.parse(argc, argv);
+  } catch (const CLI::ParseError &e) {
+    std::exit(app.exit(e));
+  }
+
+  Config config = load_config(config_path);
+  // --video-dir is only consumed when the config asks to record, but a missing
+  // path then would silently disable recording -- fail loudly instead.
+  if (config.record_video && video_dir.empty()) {
+    spdlog::error("record_video is enabled but --video-dir was not provided.");
+    std::exit(1);
+  }
+  std::optional<std::filesystem::path> video_path =
+      config.record_video
+          ? std::optional<std::filesystem::path>(std::move(video_dir))
+          : std::nullopt;
+
+  return Arguments{std::move(rom_path),     std::move(log_path),
+                   std::move(profile_path), std::move(video_path),
+                   std::move(group_name),   std::move(config)};
+}
+
 int main(int argc, char **argv) {
   stop_signal::StopSignal stop{SIGTERM, SIGINT};
 
@@ -293,21 +351,20 @@ int main(int argc, char **argv) {
   // our logs; genuine ALE warnings/errors still come through. Mode is a
   // process-wide static, so this one call covers every worker's interface too.
   ale::Logger::setMode(ale::Logger::Warning);
+
+  const Arguments args = parse_arguments(argc, argv);
+  const Config &config = args.config;
+  const std::filesystem::path &rom_path = args.rom_path;
+  const std::optional<std::filesystem::path> &video_path = args.video_path;
+  const std::filesystem::path &profile_path = args.profile_path;
+  const std::string &group_name = args.group_name;
+
   const auto start_time =
       std::chrono::system_clock::now().time_since_epoch().count();
-  const auto rom_path = std::filesystem::path(argv[1]);
-  const auto logger_path = std::filesystem::path(argv[2]).replace_extension(
-      "tfevents." + std::to_string(start_time));
-  const auto config = load_config(std::filesystem::path(argv[5]));
-  const std::optional<std::filesystem::path> video_path =
-      config.record_video
-          ? std::optional<std::filesystem::path>(std::filesystem::path(argv[3]))
-          : std::nullopt;
-  const std::string group_name = argv[4];
-  std::filesystem::path profile_path;
-  if (argc == 7) {
-    profile_path = std::filesystem::path(argv[6]);
-  }
+  const auto logger_path =
+      std::filesystem::path(args.log_path)
+          .replace_extension("tfevents." + std::to_string(start_time));
+
   torch::Device device(torch::kCPU);
   if (torch::cuda::is_available()) {
     spdlog::info("CUDA is available! Training on GPU.");

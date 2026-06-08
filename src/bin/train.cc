@@ -4,6 +4,7 @@
 #include "ai/vision.h"
 #include "stop_signal.h"
 #include "tensorboard_logger.h"
+#include <CLI/CLI.hpp>
 #include <ale/ale_interface.hpp>
 #include <ale/common/Log.hpp>
 #include <ale/version.hpp>
@@ -287,21 +288,45 @@ int main(int argc, char **argv) {
   // our logs; genuine ALE warnings/errors still come through. Mode is a
   // process-wide static, so this one call covers every worker's interface too.
   ale::Logger::setMode(ale::Logger::Warning);
+
+  CLI::App app{"Train a PPO agent on an Atari ROM."};
+  std::filesystem::path rom_path, log_path, config_path, video_dir, profile_path;
+  std::string group_name;
+  app.add_option("--rom", rom_path, "Atari ROM to train on.")
+      ->required()
+      ->check(CLI::ExistingFile);
+  app.add_option("--config", config_path, "YAML config file.")
+      ->required()
+      ->check(CLI::ExistingFile);
+  app.add_option("--log-path", log_path,
+                 "TensorBoard log path prefix; '.tfevents.<timestamp>' is "
+                 "appended at runtime.")
+      ->required();
+  app.add_option("--group", group_name,
+                 "Group name for hyperparameters logged to TensorBoard.")
+      ->required();
+  app.add_option("--video-dir", video_dir,
+                 "Directory to write videos to. Required when record_video is "
+                 "set in the config.");
+  app.add_option("--profile", profile_path,
+                 "Path to write a libtorch (Perfetto) profile to.");
+  CLI11_PARSE(app, argc, argv);
+
   const auto start_time =
       std::chrono::system_clock::now().time_since_epoch().count();
-  const auto rom_path = std::filesystem::path(argv[1]);
-  const auto logger_path = std::filesystem::path(argv[2]).replace_extension(
+  const auto logger_path = std::filesystem::path(log_path).replace_extension(
       "tfevents." + std::to_string(start_time));
-  const auto config = load_config(std::filesystem::path(argv[5]));
+  const auto config = load_config(config_path);
+  // --video-dir is only consumed when the config asks to record, but a missing
+  // path then would silently disable recording -- fail loudly instead.
+  if (config.record_video && video_dir.empty()) {
+    spdlog::error("record_video is enabled but --video-dir was not provided.");
+    return 1;
+  }
   const std::optional<std::filesystem::path> video_path =
       config.record_video
-          ? std::optional<std::filesystem::path>(std::filesystem::path(argv[3]))
+          ? std::optional<std::filesystem::path>(video_dir)
           : std::nullopt;
-  const std::string group_name = argv[4];
-  std::filesystem::path profile_path;
-  if (argc == 7) {
-    profile_path = std::filesystem::path(argv[6]);
-  }
   torch::Device device(torch::kCPU);
   if (torch::cuda::is_available()) {
     spdlog::info("CUDA is available! Training on GPU.");

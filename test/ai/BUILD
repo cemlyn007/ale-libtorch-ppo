@@ -39,3 +39,14 @@ cc_test(
         "@libtorch//:torch",
     ],
 )
+
+cc_test(
+    name = "losses-test",
+    srcs = ["losses-test.cc"],
+    copts = googletest_copts,
+    deps = [
+        "//src/ai/ppo:losses",
+        "@googletest//:gtest_main",
+        "@libtorch//:torch",
+    ],
+)

@@ -16,13 +16,14 @@ Metrics compute(const torch::Tensor &log_probabilities,
   auto entropies = compute_entropies(log_probabilities);
   auto total_losses = -clipped.values + value_loss_coef * value_losses -
                       entropy_coef * entropies;
-  return {torch::where(masks, total_losses, 0.0).sum() / masks.sum(),
-          clipped.values.detach(),
-          value_losses.detach(),
-          entropies.detach(),
-          total_losses.detach(),
-          clipped.ratios.detach(),
-          masks.detach()};
+  return {
+      torch::where(masks, total_losses, 0.0).sum() / masks.sum().clamp_min(1),
+      clipped.values.detach(),
+      value_losses.detach(),
+      entropies.detach(),
+      total_losses.detach(),
+      clipped.ratios.detach(),
+      masks.detach()};
 }
 
 ClippedSurrogateObjectivesResult clipped_surrogate_objectives(

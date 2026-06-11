@@ -50,3 +50,14 @@ cc_test(
         "@libtorch//:torch",
     ],
 )
+
+cc_test(
+    name = "checkpoint-test",
+    srcs = ["checkpoint-test.cc"],
+    copts = googletest_copts,
+    deps = [
+        "//src:checkpoint",
+        "@googletest//:gtest_main",
+        "@libtorch//:torch",
+    ],
+)

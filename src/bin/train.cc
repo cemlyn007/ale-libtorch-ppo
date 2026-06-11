@@ -10,6 +10,7 @@
 #include <ale/common/Log.hpp>
 #include <ale/version.hpp>
 #include <cstdlib>
+#include <memory>
 #include <numeric>
 #include <type_traits>
 
@@ -260,6 +261,136 @@ ai::ppo::train::Hyperparameters prepare_hyperparameters(const Config &config) {
   return hp;
 }
 
+// Read/write the learning rate on the optimizer's single Adam param group.
+double get_optimizer_lr(torch::optim::Optimizer &optimizer) {
+  return static_cast<torch::optim::AdamOptions &>(
+             optimizer.param_groups()[0].options())
+      .lr();
+}
+void set_optimizer_lr(torch::optim::Optimizer &optimizer, double lr) {
+  static_cast<torch::optim::AdamOptions &>(
+      optimizer.param_groups()[0].options())
+      .lr(lr);
+}
+
+// Strategy for turning a fresh rollout into one optimization pass. The two
+// implementations differ only in how the network is driven: the eager path
+// re-runs the autograd training loop each call; the CUDA-graph path captures
+// that loop once and replays it, refreshing its inputs in place.
+struct Trainer {
+  virtual ~Trainer() = default;
+  // Schedule the next learning rate. Honoured eagerly; a no-op once a CUDA
+  // graph has baked the rate in at capture time (see make_trainer).
+  virtual void set_learning_rate(double lr) = 0;
+  // The learning rate actually in effect, for honest logging.
+  virtual double learning_rate() = 0;
+  // Refresh inputs from the latest rollout and run one optimization pass,
+  // writing per-update metrics into the shared Metrics buffer.
+  virtual void update(ai::buffer::Batch &rollout) = 0;
+};
+
+class EagerTrainer : public Trainer {
+ public:
+  EagerTrainer(Network network, torch::optim::Optimizer &optimizer,
+               ai::ppo::train::Metrics &metrics, torch::Tensor &indices,
+               size_t num_epochs, size_t num_mini_batches,
+               ai::ppo::train::Hyperparameters hyperparameters)
+      : network_(std::move(network)),
+        optimizer_(optimizer),
+        metrics_(metrics),
+        indices_(indices),
+        num_epochs_(num_epochs),
+        num_mini_batches_(num_mini_batches),
+        hyperparameters_(hyperparameters) {}
+
+  void set_learning_rate(double lr) override {
+    set_optimizer_lr(optimizer_, lr);
+  }
+  double learning_rate() override { return get_optimizer_lr(optimizer_); }
+
+  void update(ai::buffer::Batch &rollout) override {
+    auto batch = prepare_batch(rollout);
+    ai::ppo::train::train(network_, optimizer_, metrics_, indices_, batch,
+                          num_epochs_, num_mini_batches_, hyperparameters_);
+  }
+
+ private:
+  Network network_;
+  torch::optim::Optimizer &optimizer_;
+  ai::ppo::train::Metrics &metrics_;
+  torch::Tensor &indices_;
+  size_t num_epochs_;
+  size_t num_mini_batches_;
+  ai::ppo::train::Hyperparameters hyperparameters_;
+};
+
+#ifdef __linux__
+class CudaGraphTrainer : public Trainer {
+ public:
+  CudaGraphTrainer(Network network, torch::optim::Optimizer &optimizer,
+                   ai::ppo::train::Metrics &metrics, torch::Tensor &indices,
+                   size_t num_epochs, size_t num_mini_batches,
+                   ai::ppo::train::Hyperparameters hyperparameters,
+                   ai::ppo::train::Batch batch)
+      : network_(std::move(network)),
+        optimizer_(optimizer),
+        batch_(std::move(batch)),
+        hyperparameters_(hyperparameters) {
+    network_->train();
+    ai::ppo::train::capture_train_cuda_graph(
+        graph_, network_, optimizer_, metrics, indices, batch_, num_epochs,
+        num_mini_batches, hyperparameters_, 10);
+    // Capture bakes the optimizer's lr into the graph as a host scalar; replays
+    // cannot observe later changes, so annealing is silently disabled.
+    spdlog::warn(
+        "CUDA graph enabled: learning rate frozen at {} for the run "
+        "(annealing disabled).",
+        get_optimizer_lr(optimizer_));
+  }
+
+  void set_learning_rate(double) override {}  // baked in at capture; no-op
+  double learning_rate() override { return get_optimizer_lr(optimizer_); }
+
+  void update(ai::buffer::Batch &rollout) override {
+    auto batch = prepare_batch(rollout);
+    batch_.copy_(batch);
+    ai::ppo::train::train_cuda_graph(graph_);
+  }
+
+ private:
+  Network network_;
+  torch::optim::Optimizer &optimizer_;
+  ai::ppo::train::Batch batch_;
+  ai::ppo::train::Hyperparameters hyperparameters_;
+  at::cuda::CUDAGraph graph_;
+};
+#endif
+
+// Builds the training strategy once, up front: the CUDA-graph path captures its
+// graph here (in the constructor) and unsupported platforms are rejected
+// eagerly rather than failing inside the rollout loop. initial_batch is the
+// persistent input buffer for capture; the eager path ignores it.
+std::unique_ptr<Trainer> make_trainer(const Config &config, Network network,
+                                      torch::optim::Optimizer &optimizer,
+                                      ai::ppo::train::Metrics &metrics,
+                                      torch::Tensor &indices,
+                                      ai::ppo::train::Batch initial_batch) {
+  auto hyperparameters = prepare_hyperparameters(config);
+  if (!config.cuda_graph)
+    return std::make_unique<EagerTrainer>(
+        std::move(network), optimizer, metrics, indices, config.num_epochs,
+        config.num_mini_batches, hyperparameters);
+#ifdef __linux__
+  return std::make_unique<CudaGraphTrainer>(
+      std::move(network), optimizer, metrics, indices, config.num_epochs,
+      config.num_mini_batches, hyperparameters, std::move(initial_batch));
+#else
+  (void)initial_batch;
+  throw std::runtime_error(
+      "cuda_graph is only supported on Linux; set cuda_graph=false.");
+#endif
+}
+
 void enable_torch_determinism(uint64_t seed) {
   // As per the logged warning by LibTorch: "Warning: Deterministic behavior was
   // enabled with either `torch.use_deterministic_algorithms(True)` or
@@ -429,24 +560,17 @@ int main(int argc, char **argv) {
   logger.add_hparams(get_parameters(config, action_size), group_name,
                      start_time);
 
-  ai::buffer::Batch b;
+  ai::ppo::train::Batch initial_batch;
   {
     torch::NoGradGuard no_grad;
-    b = rollout.rollout().batch;
+    auto b = rollout.rollout().batch;
+    initial_batch = prepare_batch(b);
   }
-  ai::ppo::train::Batch batch = prepare_batch(b);
+  // On the CUDA-graph path make_trainer captures the graph here, using
+  // initial_batch as its persistent input buffer; the eager path ignores it.
+  std::unique_ptr<Trainer> trainer = make_trainer(
+      config, network, optimizer, metrics, indices, std::move(initial_batch));
   ai::rollout::RolloutResult result;
-
-#ifdef __linux__
-  at::cuda::CUDAGraph graph;
-  network->train();
-  if (config.cuda_graph) {
-    auto hp = prepare_hyperparameters(config);
-    ai::ppo::train::capture_train_cuda_graph(graph, network, optimizer, metrics,
-                                             indices, batch, config.num_epochs,
-                                             config.num_mini_batches, hp, 10);
-  }
-#endif
   if (!profile_path.empty()) {
     torch::autograd::profiler::ProfilerConfig profiler_config =
         torch::autograd::profiler::ProfilerConfig(
@@ -465,38 +589,17 @@ int main(int argc, char **argv) {
       break;
     }
     spdlog::info("Rollout {} of {}", rollout_index + 1, config.num_rollouts);
-    auto lr = config.learning_rate *
-              (1.0 - rollout_index / static_cast<double>(config.num_rollouts));
-    static_cast<torch::optim::AdamOptions &>(
-        optimizer.param_groups()[0].options())
-        .lr(lr);
+    trainer->set_learning_rate(
+        config.learning_rate *
+        (1.0 - rollout_index / static_cast<double>(config.num_rollouts)));
 
     {
       torch::NoGradGuard no_grad;
       result = rollout.rollout();
     }
-    if (config.cuda_graph) {
-#ifdef __linux__
-      auto b = prepare_batch(result.batch);
-      batch.copy_(b);
-      ai::ppo::train::train_cuda_graph(graph);
-#else
-      TORCH_CHECK(false,
-                  "cuda_graph is only supported on Linux (__linux__ not "
-                  "defined). Set cuda_graph=false or run on Linux.");
-#endif
+    trainer->update(result.batch);
 
-    } else {
-      batch = prepare_batch(result.batch);
-      auto hp = prepare_hyperparameters(config);
-      ai::ppo::train::train(network, optimizer, metrics, indices, batch,
-                            config.num_epochs, config.num_mini_batches, hp);
-    }
-
-    log_data(logger, result.log, metrics,
-             static_cast<torch::optim::AdamOptions &>(
-                 optimizer.param_groups()[0].options())
-                 .lr());
+    log_data(logger, result.log, metrics, trainer->learning_rate());
   }
   if (!profile_path.empty()) {
     auto profiler_result = torch::autograd::profiler::disableProfiler();

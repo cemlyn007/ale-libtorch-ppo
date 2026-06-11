@@ -34,8 +34,10 @@ ScreenBuffer EpisodeRecorder::reset() {
   return observation;
 }
 
-Step EpisodeRecorder::step(const ale::Action &action) {
-  auto result = env_->step(action);
+Step EpisodeRecorder::step(const ale::Action &action, bool want_observation) {
+  // The recorder grabs its own full-resolution screen via the interface, so
+  // the observation flag just passes through.
+  auto result = env_->step(action, want_observation);
   update_buffer();
   video_recorder_.write(buffer_.data());
   if (result.terminated || result.truncated) video_recorder_.close();

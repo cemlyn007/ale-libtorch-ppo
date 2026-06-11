@@ -118,6 +118,8 @@ Rollout::Rollout(
   }
   for (auto &thread : threads) thread.join();
 
+  minimal_action_set_ = environments_[0]->get_interface().getMinimalActionSet();
+
   auto total = static_cast<int64_t>(total_environments_);
   auto frame = static_cast<int64_t>(frame_stack_);
   auto options = torch::TensorOptions(torch::kFloat32).device(device_);
@@ -158,24 +160,26 @@ Rollout::create_environment(
         std::make_unique<ai::environment::TruncateOnEpisodeReturnEnvironment>(
             std::move(environment), max_return);
 
-  environment = std::make_unique<ai::environment::ResizeEnvironment>(
-      std::move(environment), height_, width_);
+  // The full-screen recorder grabs RGB straight off the interface, so it stays
+  // below MaxAndSkip to capture every emulator frame (60fps video).
+  if (i == 0 && video_path.has_value() && !record_observation_)
+    environment = std::make_unique<ai::environment::EpisodeRecorder>(
+        std::move(environment), video_path.value(), false);
 
-  if (i == 0 && video_path.has_value()) {
-    if (record_observation_)
-      environment =
-          std::make_unique<ai::environment::EpisodeObservationRecorder>(
-              std::move(environment), video_path.value(), grayscale_ ? 1 : 3,
-              height_, width_);
-    else
-      environment = std::make_unique<ai::environment::EpisodeRecorder>(
-          std::move(environment), video_path.value(), false);
-  }
   // TODO: Make this configurable.
   environment = std::make_unique<ai::environment::NoopResetEnvironment>(
       std::move(environment), 30, seed + i);
   environment = std::make_unique<ai::environment::MaxAndSkipEnvironment>(
       std::move(environment), frame_skip);
+  // Resize sits above MaxAndSkip so flicker pooling happens at native
+  // resolution and only the one emitted frame per skip window pays the resize.
+  environment = std::make_unique<ai::environment::ResizeEnvironment>(
+      std::move(environment), width_, height_);
+  // Above Resize so it records exactly what the agent sees (pooled + resized).
+  if (i == 0 && video_path.has_value() && record_observation_)
+    environment = std::make_unique<ai::environment::EpisodeObservationRecorder>(
+        std::move(environment), video_path.value(), grayscale_ ? 1 : 3, height_,
+        width_);
   environment =
       std::make_unique<ai::environment::EpisodeLife>(std::move(environment));
   environment =
@@ -231,9 +235,11 @@ RolloutResult Rollout::rollout() {
 
   for (size_t time_index = 0; time_index < horizon_; time_index++) {
     // Action Selection. Pull the actions to the host once (one sync) so workers
-    // index them without a per-env device->host copy.
+    // index them without a per-env device->host copy. kLong + contiguous so
+    // workers can read through a raw pointer.
     action_result_ = action_selector_(observations_);
-    actions_cpu_ = action_result_.actions.to(torch::kCPU);
+    actions_cpu_ =
+        action_result_.actions.to(torch::kCPU, torch::kInt64).contiguous();
 
     // Step all environments with the selected actions.
     size_t total_steps_increment = 0;
@@ -337,15 +343,14 @@ StepResult Rollout::step(const size_t environment_index) {
     output.truncated = false;
     output.game_over = false;
   } else {
-    auto &interface = environments_[environment_index]->get_interface();
-    auto action_set = interface.getMinimalActionSet();
-    size_t action_index = actions_cpu_[environment_index].item<int64_t>();
-    if (action_index < 0 || action_index >= action_set.size())
+    const size_t action_index =
+        actions_cpu_.const_data_ptr<int64_t>()[environment_index];
+    if (action_index >= minimal_action_set_.size())
       throw std::out_of_range("Action index out of range for environment " +
                               std::to_string(environment_index));
-    auto action = action_set[action_index];
+    auto action = minimal_action_set_[action_index];
     auto result = environments_[environment_index]->step(action);
-    observation = result.observation;
+    observation = std::move(result.observation);
     output.reward = result.reward;
     output.terminated = result.terminated;
     output.truncated = result.truncated;

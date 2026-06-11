@@ -12,8 +12,9 @@ class EpisodeObservationRecorder : public VirtualEnvironment {
                                       const std::filesystem::path &video_path,
                                       size_t channels, size_t height,
                                       size_t width);
+  using VirtualEnvironment::step;
   ScreenBuffer reset() override;
-  Step step(const ale::Action &action) override;
+  Step step(const ale::Action &action, bool want_observation) override;
   ale::ALEInterface &get_interface() override;
 
  private:

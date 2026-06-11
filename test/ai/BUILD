@@ -14,6 +14,7 @@ cc_test(
     ],
     deps = [
         "//src/ai/environment",
+        "//src/ai/environment:max_and_skip",
         "@googletest//:gtest_main",
     ],
 )

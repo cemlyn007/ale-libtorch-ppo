@@ -20,8 +20,11 @@ ScreenBuffer EpisodeObservationRecorder::reset() {
   return observation;
 }
 
-Step EpisodeObservationRecorder::step(const ale::Action &action) {
-  auto result = env_->step(action);
+Step EpisodeObservationRecorder::step(const ale::Action &action,
+                                      bool /*want_observation*/) {
+  // The recording is made from the observation, so it is always wanted here
+  // regardless of what the caller asked for.
+  auto result = env_->step(action, true);
   video_recorder_.write(result.observation.data());
   if (result.terminated || result.truncated) video_recorder_.close();
   return result;

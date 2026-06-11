@@ -142,3 +142,66 @@ TEST_F(CheckpointTest, RestoresOptimizerStateSoTrainingContinues) {
         << "Resumed step diverged for parameter " << i;
   }
 }
+
+TEST_F(CheckpointTest, CheckpointerWritesBestOnlyOnImprovement) {
+  TinyNet net;
+  torch::optim::Adam optimizer(net->parameters(),
+                               torch::optim::AdamOptions(0.1));
+  std::vector<std::string> announced;
+  checkpoint::Checkpointer checkpointer(
+      path(""), /*interval=*/100,
+      [&](size_t, const std::string &text) { announced.push_back(text); });
+
+  checkpointer.on_rollout_end(0, 10, 5.0, *net, optimizer);
+  ASSERT_TRUE(std::filesystem::exists(path("best.pt")));
+  EXPECT_DOUBLE_EQ(checkpointer.best_return(), 5.0);
+
+  // A worse rollout and an episode-free rollout must both leave best.pt alone.
+  checkpointer.on_rollout_end(1, 20, 4.0, *net, optimizer);
+  checkpointer.on_rollout_end(2, 30, std::nullopt, *net, optimizer);
+  EXPECT_DOUBLE_EQ(checkpointer.best_return(), 5.0);
+  ASSERT_EQ(announced.size(), 1u);
+  EXPECT_NE(announced[0].find("best.pt"), std::string::npos);
+
+  checkpointer.on_rollout_end(3, 40, 6.0, *net, optimizer);
+  EXPECT_DOUBLE_EQ(checkpointer.best_return(), 6.0);
+  EXPECT_EQ(announced.size(), 2u);
+  EXPECT_FALSE(std::filesystem::exists(path("latest.pt")));
+}
+
+TEST_F(CheckpointTest, CheckpointerWritesLatestOnInterval) {
+  TinyNet net;
+  torch::optim::Adam optimizer(net->parameters(),
+                               torch::optim::AdamOptions(0.1));
+  checkpoint::Checkpointer checkpointer(path(""), /*interval=*/2);
+
+  checkpointer.on_rollout_end(0, 10, std::nullopt, *net, optimizer);
+  EXPECT_FALSE(std::filesystem::exists(path("latest.pt")));
+
+  // Interval counts completed rollouts, so the second rollout (index 1) hits.
+  checkpointer.on_rollout_end(1, 20, std::nullopt, *net, optimizer);
+  ASSERT_TRUE(std::filesystem::exists(path("latest.pt")));
+
+  TinyNet restored;
+  torch::optim::Adam restored_optimizer(restored->parameters(),
+                                        torch::optim::AdamOptions(0.1));
+  const checkpoint::Checkpoint loaded = checkpoint::load(
+      path("latest.pt"), *restored, restored_optimizer, torch::kCPU);
+  EXPECT_EQ(loaded.next_rollout_index, 2u);
+  EXPECT_EQ(loaded.global_step, 20u);
+}
+
+TEST_F(CheckpointTest, CheckpointerDisabledWhenIntervalZero) {
+  TinyNet net;
+  torch::optim::Adam optimizer(net->parameters(),
+                               torch::optim::AdamOptions(0.1));
+  std::vector<std::string> announced;
+  checkpoint::Checkpointer checkpointer(
+      path(""), /*interval=*/0,
+      [&](size_t, const std::string &text) { announced.push_back(text); });
+
+  checkpointer.on_rollout_end(0, 10, 5.0, *net, optimizer);
+  EXPECT_FALSE(std::filesystem::exists(path("best.pt")));
+  EXPECT_FALSE(std::filesystem::exists(path("latest.pt")));
+  EXPECT_TRUE(announced.empty());
+}

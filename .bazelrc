@@ -19,5 +19,15 @@ build:dbg --features=oso_prefix_is_pwd
 # Optimized build specific options:
 build:opt --cxxopt='-O3'
 
+# ALE PGO (scripts/ale_pgo.sh drives the cycle): `gen` builds an instrumented
+# emulator, `use` feeds the harvested profiles back. ~+10% env stepping.
+# Unsandboxed: GCC hashes absolute source paths into per-function profile
+# checksums, so gen and use must compile ALE from the same paths (the
+# execroot) rather than from per-run sandbox dirs.
+build:ale-pgo-gen --//third_party:ale_pgo=gen
+build:ale-pgo-gen --strategy=CcCmakeMakeRule=local
+build:ale-pgo-use --//third_party:ale_pgo=use
+build:ale-pgo-use --strategy=CcCmakeMakeRule=local
+
 # Test options:
 test: --test_output=all

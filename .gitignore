@@ -5,3 +5,4 @@ videos
 images
 *.mp4
 .claude/worktrees/
+third_party/ale-pgo/

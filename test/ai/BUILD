@@ -30,6 +30,18 @@ cc_test(
 )
 
 cc_test(
+    name = "ppo-train-test",
+    srcs = ["ppo-train-test.cc"],
+    # train.h pulls in c10/cuda/CUDAEvent.h; see //src/ai/ppo:train.
+    copts = googletest_copts + ["-Wno-error=interference-size"],
+    deps = [
+        "//src/ai/ppo",
+        "@googletest//:gtest_main",
+        "@libtorch//:torch",
+    ],
+)
+
+cc_test(
     name = "gae-test",
     srcs = ["gae-test.cc"],
     copts = googletest_copts,

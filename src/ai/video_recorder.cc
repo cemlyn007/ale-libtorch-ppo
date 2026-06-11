@@ -1,5 +1,6 @@
 #include "video_recorder.h"
 
+#include <fcntl.h>
 #include <sys/wait.h>
 
 #include <cerrno>
@@ -63,13 +64,20 @@ void VideoRecorder::open(const std::filesystem::path& path) {
                         pixel_format_ + " -s " + std::to_string(width_) + "x" +
                         std::to_string(height_) + " -r " +
                         std::to_string(fps_) +
-                        " -i - -c:v libx264 -pix_fmt yuv420p "
+                        // veryfast/-threads 1: diagnostics video must not
+                        // steal cores from the CPU-bound env threads.
+                        " -i - -c:v libx264 -preset veryfast -crf 28 "
+                        "-threads 1 -pix_fmt yuv420p "
                         "-movflags +faststart -hide_banner -loglevel error " +
                         shell_quote((video_dir_ / path).string());
   ffmpeg_stream_ = popen(command.c_str(), "w");
   if (!ffmpeg_stream_)
     throw std::runtime_error(std::string("Failed to open pipe for ffmpeg: ") +
                              std::strerror(errno));
+  // A full-res RGB frame (~100KB) exceeds the default 64KB pipe, so every
+  // write would block until x264 drains. 1MB buys ~10 frames of slack;
+  // best-effort, failure just keeps the default capacity.
+  fcntl(fileno(ffmpeg_stream_), F_SETPIPE_SZ, 1 << 20);
 }
 
 void VideoRecorder::write(std::span<const unsigned char> frame) {

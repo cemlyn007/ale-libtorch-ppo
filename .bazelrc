@@ -3,9 +3,6 @@
 # set the C++ standard explicitly for the target and host configs.
 build --cxxopt='-std=c++20'
 build --host_cxxopt='-std=c++20'
-# rules_foreign_cc's bundled pkg-config glib won't compile under GCC 15's C23
-# default (member named `bool`); pin its host C compiles to gnu17.
-build --host_conlyopt='-std=gnu17'
 build --cxxopt='-Wall'
 build --cxxopt='-Werror'
 # Don't hold third-party code to our -Werror (e.g. protobuf 33.4's own deprecated-API use).
@@ -21,13 +18,8 @@ build:opt --cxxopt='-O3'
 
 # ALE PGO (scripts/ale_pgo.sh drives the cycle): `gen` builds an instrumented
 # emulator, `use` feeds the harvested profiles back. ~+10% env stepping.
-# Unsandboxed: GCC hashes absolute source paths into per-function profile
-# checksums, so gen and use must compile ALE from the same paths (the
-# execroot) rather than from per-run sandbox dirs.
 build:ale-pgo-gen --//third_party:ale_pgo=gen
-build:ale-pgo-gen --strategy=CcCmakeMakeRule=local
 build:ale-pgo-use --//third_party:ale_pgo=use
-build:ale-pgo-use --strategy=CcCmakeMakeRule=local
 
 # Test options:
 test: --test_output=all

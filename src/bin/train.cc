@@ -15,10 +15,10 @@
 #include <optional>
 #include <type_traits>
 
+#include "ai/checkpoint.h"
 #include "ai/ppo/losses.h"
 #include "ai/rollout.h"
 #include "ai/vision.h"
-#include "checkpoint.h"
 #include "stop_signal.h"
 #include "tensorboard_logger.h"
 
@@ -595,7 +595,7 @@ int main(int argc, char **argv) {
         profiler_config, activities,
         {torch::RecordScope::FUNCTION, torch::RecordScope::USER_SCOPE});
   }
-  checkpoint::Checkpointer checkpointer(
+  ai::checkpoint::Checkpointer checkpointer(
       run_dir, config.checkpoint_interval,
       [&logger](size_t step, const std::string &text) {
         logger.add_text("checkpoint", step, text.c_str());

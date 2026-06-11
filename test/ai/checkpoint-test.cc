@@ -1,4 +1,4 @@
-#include "checkpoint.h"
+#include "ai/checkpoint.h"
 
 #include <torch/torch.h>
 
@@ -6,7 +6,7 @@
 
 namespace {
 
-// A tiny stand-in for the training network: checkpoint::save/load take the
+// A tiny stand-in for the training network: ai::checkpoint::save/load take the
 // torch::nn::Module base, so the round trip is independent of the real
 // architecture and a couple of linear layers exercise every code path.
 struct TinyNetImpl : torch::nn::Module {
@@ -62,17 +62,18 @@ TEST_F(CheckpointTest, RoundTripsModelParameters) {
   }
 
   const auto checkpoint_path = path("model_round_trip.pt");
-  checkpoint::save(checkpoint_path, *saved, optimizer,
-                   {/*next_rollout_index=*/0,
-                    /*best_return=*/0.0,
-                    /*global_step=*/0});
+  ai::checkpoint::save(checkpoint_path, *saved, optimizer,
+                       {/*next_rollout_index=*/0,
+                        /*best_return=*/0.0,
+                        /*global_step=*/0});
 
   // A fresh network starts from different random weights; load must overwrite
   // them with the saved ones.
   TinyNet restored;
   torch::optim::Adam restored_optimizer(restored->parameters(),
                                         torch::optim::AdamOptions(0.1));
-  checkpoint::load(checkpoint_path, *restored, restored_optimizer, torch::kCPU);
+  ai::checkpoint::load(checkpoint_path, *restored, restored_optimizer,
+                       torch::kCPU);
 
   const auto restored_params = restored->parameters();
   ASSERT_EQ(restored_params.size(), expected.size());
@@ -87,16 +88,16 @@ TEST_F(CheckpointTest, RoundTripsCheckpointScalars) {
   torch::optim::Adam optimizer(net->parameters(),
                                torch::optim::AdamOptions(0.1));
 
-  const checkpoint::Checkpoint original{/*next_rollout_index=*/7,
-                                        /*best_return=*/12.5,
-                                        /*global_step=*/2048};
+  const ai::checkpoint::Checkpoint original{/*next_rollout_index=*/7,
+                                            /*best_return=*/12.5,
+                                            /*global_step=*/2048};
   const auto checkpoint_path = path("scalars_round_trip.pt");
-  checkpoint::save(checkpoint_path, *net, optimizer, original);
+  ai::checkpoint::save(checkpoint_path, *net, optimizer, original);
 
   TinyNet restored;
   torch::optim::Adam restored_optimizer(restored->parameters(),
                                         torch::optim::AdamOptions(0.1));
-  const checkpoint::Checkpoint loaded = checkpoint::load(
+  const ai::checkpoint::Checkpoint loaded = ai::checkpoint::load(
       checkpoint_path, *restored, restored_optimizer, torch::kCPU);
 
   EXPECT_EQ(loaded.next_rollout_index, original.next_rollout_index);
@@ -115,9 +116,9 @@ TEST_F(CheckpointTest, RestoresOptimizerStateSoTrainingContinues) {
   step_with_unit_grads(net, optimizer);
 
   const auto checkpoint_path = path("optimizer_state.pt");
-  checkpoint::save(checkpoint_path, *net, optimizer,
-                   {/*next_rollout_index=*/2, /*best_return=*/0.0,
-                    /*global_step=*/0});
+  ai::checkpoint::save(checkpoint_path, *net, optimizer,
+                       {/*next_rollout_index=*/2, /*best_return=*/0.0,
+                        /*global_step=*/0});
 
   // One more step on the original run is the ground truth a resumed run must
   // reproduce exactly.
@@ -130,7 +131,8 @@ TEST_F(CheckpointTest, RestoresOptimizerStateSoTrainingContinues) {
   TinyNet resumed;
   torch::optim::Adam resumed_optimizer(
       resumed->parameters(), torch::optim::AdamOptions(0.1).eps(1e-5));
-  checkpoint::load(checkpoint_path, *resumed, resumed_optimizer, torch::kCPU);
+  ai::checkpoint::load(checkpoint_path, *resumed, resumed_optimizer,
+                       torch::kCPU);
   step_with_unit_grads(resumed, resumed_optimizer);
 
   const auto resumed_params = resumed->parameters();
@@ -148,7 +150,7 @@ TEST_F(CheckpointTest, CheckpointerWritesBestOnlyOnImprovement) {
   torch::optim::Adam optimizer(net->parameters(),
                                torch::optim::AdamOptions(0.1));
   std::vector<std::string> announced;
-  checkpoint::Checkpointer checkpointer(
+  ai::checkpoint::Checkpointer checkpointer(
       path(""), /*interval=*/100,
       [&](size_t, const std::string &text) { announced.push_back(text); });
 
@@ -173,7 +175,7 @@ TEST_F(CheckpointTest, CheckpointerWritesLatestOnInterval) {
   TinyNet net;
   torch::optim::Adam optimizer(net->parameters(),
                                torch::optim::AdamOptions(0.1));
-  checkpoint::Checkpointer checkpointer(path(""), /*interval=*/2);
+  ai::checkpoint::Checkpointer checkpointer(path(""), /*interval=*/2);
 
   checkpointer.on_rollout_end(0, 10, std::nullopt, *net, optimizer);
   EXPECT_FALSE(std::filesystem::exists(path("latest.pt")));
@@ -185,7 +187,7 @@ TEST_F(CheckpointTest, CheckpointerWritesLatestOnInterval) {
   TinyNet restored;
   torch::optim::Adam restored_optimizer(restored->parameters(),
                                         torch::optim::AdamOptions(0.1));
-  const checkpoint::Checkpoint loaded = checkpoint::load(
+  const ai::checkpoint::Checkpoint loaded = ai::checkpoint::load(
       path("latest.pt"), *restored, restored_optimizer, torch::kCPU);
   EXPECT_EQ(loaded.next_rollout_index, 2u);
   EXPECT_EQ(loaded.global_step, 20u);
@@ -196,7 +198,7 @@ TEST_F(CheckpointTest, CheckpointerDisabledWhenIntervalZero) {
   torch::optim::Adam optimizer(net->parameters(),
                                torch::optim::AdamOptions(0.1));
   std::vector<std::string> announced;
-  checkpoint::Checkpointer checkpointer(
+  ai::checkpoint::Checkpointer checkpointer(
       path(""), /*interval=*/0,
       [&](size_t, const std::string &text) { announced.push_back(text); });
 

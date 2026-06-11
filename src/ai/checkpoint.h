@@ -9,7 +9,7 @@
 #include <string>
 #include <utility>
 
-namespace checkpoint {
+namespace ai::checkpoint {
 
 // Everything needed to resume a run: model weights, optimizer moments, the next
 // rollout to run (so the LR schedule continues), and the best return seen so
@@ -126,4 +126,4 @@ class Checkpointer {
   double best_return_ = -std::numeric_limits<double>::infinity();
 };
 
-}  // namespace checkpoint
+}  // namespace ai::checkpoint

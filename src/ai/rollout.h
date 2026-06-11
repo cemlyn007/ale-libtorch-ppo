@@ -107,6 +107,10 @@ class Rollout {
 
   std::vector<std::unique_ptr<ai::environment::VirtualEnvironment>>
       environments_;
+  // Same ROM in every env, so one copy serves all workers (read-only after
+  // construction). getMinimalActionSet() builds a fresh vector per call, so
+  // it must not be called per step.
+  std::vector<ale::Action> minimal_action_set_;
 
   std::atomic<bool> stop_;
 

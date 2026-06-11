@@ -11,8 +11,9 @@ class EpisodeRecorder : public VirtualEnvironment {
   explicit EpisodeRecorder(std::unique_ptr<VirtualEnvironment> env,
                            const std::filesystem::path &video_path,
                            bool grayscale);
+  using VirtualEnvironment::step;
   ScreenBuffer reset() override;
-  Step step(const ale::Action &action) override;
+  Step step(const ale::Action &action, bool want_observation) override;
   ale::ALEInterface &get_interface() override;
 
  private:

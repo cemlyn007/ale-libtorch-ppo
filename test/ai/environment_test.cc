@@ -3,7 +3,11 @@
 #include <ale/ale_interface.hpp>
 #include <cstdlib>
 #include <filesystem>
+#include <memory>
+#include <stdexcept>
+#include <vector>
 
+#include "ai/environment/max_and_skip.h"
 #include "gtest/gtest.h"
 
 class EnvironmentTest : public ::testing::Test {
@@ -87,4 +91,93 @@ TEST_F(EnvironmentTest, TerminationFlagOnLossOfAllLives) {
   EXPECT_TRUE(step.terminated);
   EXPECT_TRUE(step.game_over);
   EXPECT_FALSE(step.truncated);
+}
+
+namespace {
+
+// Deterministic stand-in for MaxAndSkip tests: frame n is the single pixel
+// {n}, and grabbed frame numbers are recorded, so pooling and grab-skipping
+// are observable from the outside.
+class FakeEnvironment : public ai::environment::VirtualEnvironment {
+ public:
+  explicit FakeEnvironment(int terminate_at_frame = 0)
+      : terminate_at_frame_(terminate_at_frame) {}
+  using VirtualEnvironment::step;
+  ai::environment::ScreenBuffer reset() override {
+    frame_ = 0;
+    return {static_cast<unsigned char>(frame_)};
+  }
+  ai::environment::Step step(const ale::Action &,
+                             bool want_observation) override {
+    ++frame_;
+    if (want_observation) grabbed_frames.push_back(frame_);
+    const bool terminated =
+        terminate_at_frame_ != 0 && frame_ >= terminate_at_frame_;
+    ai::environment::ScreenBuffer observation;
+    if (want_observation)
+      observation.push_back(static_cast<unsigned char>(frame_));
+    return {.observation = std::move(observation),
+            .reward = 1,
+            .terminated = terminated,
+            .truncated = false,
+            .game_over = terminated};
+  }
+  ale::ALEInterface &get_interface() override {
+    throw std::logic_error("FakeEnvironment has no ALE interface.");
+  }
+
+  std::vector<int> grabbed_frames;
+
+ private:
+  int terminate_at_frame_;
+  int frame_ = 0;
+};
+
+}  // namespace
+
+// The emitted observation pools the last two frames of the skip window, the
+// earlier frames' screens are never grabbed, and rewards sum over the window.
+TEST(MaxAndSkipEnvironmentTest, PoolsLastTwoFramesAndSkipsEarlierGrabs) {
+  auto fake = std::make_unique<FakeEnvironment>();
+  auto *fake_ptr = fake.get();
+  ai::environment::MaxAndSkipEnvironment env(std::move(fake), 4);
+
+  env.reset();
+  auto step = env.step(ale::Action::PLAYER_A_NOOP);
+  EXPECT_EQ(step.observation, ai::environment::ScreenBuffer{4});
+  EXPECT_EQ(step.reward, 4);
+  EXPECT_EQ(fake_ptr->grabbed_frames, (std::vector<int>{3, 4}));
+
+  step = env.step(ale::Action::PLAYER_A_NOOP);
+  EXPECT_EQ(step.observation, ai::environment::ScreenBuffer{8});
+  EXPECT_EQ(fake_ptr->grabbed_frames, (std::vector<int>{3, 4, 7, 8}));
+}
+
+// Termination once the pooling window has been entered emits the frame that
+// was grabbed on the terminal step.
+TEST(MaxAndSkipEnvironmentTest, TerminationInPoolingWindowEmitsTerminalFrame) {
+  auto fake = std::make_unique<FakeEnvironment>(/*terminate_at_frame=*/3);
+  ai::environment::MaxAndSkipEnvironment env(std::move(fake), 4);
+
+  env.reset();
+  auto step = env.step(ale::Action::PLAYER_A_NOOP);
+  EXPECT_TRUE(step.terminated);
+  EXPECT_EQ(step.reward, 3);
+  EXPECT_EQ(step.observation, ai::environment::ScreenBuffer{3});
+}
+
+// Termination before the pooling window means no frame was grabbed; the
+// terminal step must still emit a correctly-sized observation (the most
+// recent real frame, here the reset frame).
+TEST(MaxAndSkipEnvironmentTest, EarlyTerminationFallsBackToLastRealFrame) {
+  auto fake = std::make_unique<FakeEnvironment>(/*terminate_at_frame=*/2);
+  auto *fake_ptr = fake.get();
+  ai::environment::MaxAndSkipEnvironment env(std::move(fake), 4);
+
+  env.reset();
+  auto step = env.step(ale::Action::PLAYER_A_NOOP);
+  EXPECT_TRUE(step.terminated);
+  EXPECT_EQ(step.reward, 2);
+  EXPECT_TRUE(fake_ptr->grabbed_frames.empty());
+  EXPECT_EQ(step.observation, ai::environment::ScreenBuffer{0});
 }

@@ -10,8 +10,9 @@ class TruncateOnEpisodeReturnEnvironment : public VirtualEnvironment {
  public:
   explicit TruncateOnEpisodeReturnEnvironment(
       std::unique_ptr<VirtualEnvironment> env, ale::reward_t max_return);
+  using VirtualEnvironment::step;
   ScreenBuffer reset() override;
-  Step step(const ale::Action &action) override;
+  Step step(const ale::Action &action, bool want_observation) override;
   ale::ALEInterface &get_interface() override;
 
  private:

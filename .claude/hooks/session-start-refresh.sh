@@ -9,6 +9,22 @@
 set -euo pipefail
 
 cd "${CLAUDE_PROJECT_DIR:-.}"
+
+# Linked worktrees need the gitignored runtime dirs symlinked from the main
+# checkout — without roms/, the //:roms glob in BUILD hard-fails package
+# loading, breaking the refresh below. worktree-create.sh seeds these links,
+# but worktrees made by other means (e.g. Claude Code's built-in worktree
+# creation) bypass that hook, so self-heal here. -e is false for a dangling
+# link, which ln -sfn then replaces; an existing real dir is left alone.
+main="$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")"
+if [ "$main" != "$PWD" ]; then
+  for d in logs roms videos images; do
+    if [ -e "$main/$d" ] && [ ! -e "$d" ]; then
+      ln -sfn "$main/$d" "$d"
+    fi
+  done
+fi
+
 cc="compile_commands.json"
 
 need=0

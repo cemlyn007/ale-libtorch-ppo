@@ -107,10 +107,15 @@ Rollout::Rollout(
   for (size_t i = 0; i < total_environments_; ++i) {
     threads.emplace_back([&, i]() {
 #if defined(__linux__)
-      cpu_set_t cpuset;
-      CPU_ZERO(&cpuset);
-      CPU_SET(i % std::thread::hardware_concurrency(), &cpuset);
-      pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t), &cpuset);
+      // Pin to cores 1..N-1, never core 0, so the unpinned main thread always
+      // has a core no pinned thread can occupy. (N can be reported as 0.)
+      const unsigned n = std::thread::hardware_concurrency();
+      if (n > 1) {
+        cpu_set_t cpuset;
+        CPU_ZERO(&cpuset);
+        CPU_SET(1 + (i % (n - 1)), &cpuset);
+        pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t), &cpuset);
+      }
 #endif
       environments_[i] =
           create_environment(i, seed, frame_skip, max_return, video_path);
@@ -140,6 +145,9 @@ Rollout::Rollout(
   is_episode_start_cpu_.resize(total_environments_, 1);
 
   spdlog::info("Creating {} worker threads.", num_workers);
+  // Workers stay unpinned: a pinned worker sharing the main thread's core
+  // would starve it, and ffmpeg (popen'd from a worker on episode reset)
+  // inherits the caller's mask. Configs size num_workers to cores-1 instead.
   for (size_t i = 0; i < num_workers; ++i) {
     workers_.emplace_back(&Rollout::worker, this);
   }

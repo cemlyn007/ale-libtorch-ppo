@@ -15,7 +15,8 @@ gae_discount: 0.99
 gae_lambda: 0.95
 max_gradient_norm: 0.5
 num_rollouts: 1000000
-num_workers: 32
+# Hardware threads minus one, leaving a core for the main thread.
+num_workers: 31
 worker_batch_size: 8
 frame_skip: 4
 # Breakout max possible score.

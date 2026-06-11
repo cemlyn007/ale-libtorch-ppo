@@ -28,12 +28,15 @@ for d in logs roms videos images; do
   ln -sfn "$ROOT/$d" "$DIR/$d"
 done
 
-# Seed compile_commands.json for clangd: reuse the main checkout's if present,
-# otherwise generate one in the worktree via hedron's refresh target.
-if [ -f "$ROOT/compile_commands.json" ]; then
-  cp "$ROOT/compile_commands.json" "$DIR/compile_commands.json"
-else
-  ( cd "$DIR" && bazel run //:refresh_compile_commands >&2 )
-fi
+# Generate compile_commands.json fresh in the worktree so clangd indexes THIS
+# branch. Copying the main checkout's index is wrong: its `directory` and the
+# absolute execroot paths baked into each command point at the main tree, not
+# this worktree, so clangd would resolve sources against the wrong checkout
+# until the first refresh overwrote it. Don't let a refresh failure abort the
+# hook (set -e) before we print $DIR — a missing index is a clangd nicety, but
+# no stdout means Claude Code can't locate the worktree. SessionStart's refresh
+# retries when the index is missing anyway.
+( cd "$DIR" && bazel run //:refresh_compile_commands >&2 ) \
+  || echo "warning: refresh_compile_commands failed; clangd index not seeded" >&2
 
 echo "$DIR"

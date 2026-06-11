@@ -22,6 +22,18 @@
           }
         ]
       }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PROJECT_DIR}/.claude/hooks/session-start-refresh.sh\"",
+            "statusMessage": "Re-syncing compile_commands.json for clangd…",
+            "timeout": 600
+          }
+        ]
+      }
     ]
   }
 }

@@ -61,14 +61,19 @@ class Rollout {
       const std::optional<std::filesystem::path> &video_path) const;
   StepResult step(const size_t environment_index);
   std::vector<StepResult> step_all();
+  void upload_step_state();
   void worker();
 
   std::filesystem::path rom_path_;
   size_t height_;
   size_t width_;
   ai::buffer::Buffer buffer_;
-  std::vector<std::vector<unsigned char>> screen_buffers_;
-  std::vector<torch::Tensor> screen_tensor_blobs_;
+  // Single page-locked staging buffer [total_environments, ...frame_shape] for
+  // the newest frame of every env. Workers memcpy into disjoint slices; one
+  // async H2D copy per step feeds the frame stack.
+  torch::Tensor staging_;
+  uint8_t *staging_ptr_ = nullptr;
+  int64_t frame_bytes_ = 0;
   torch::Tensor observations_;
   size_t total_environments_;
   size_t horizon_;
@@ -79,13 +84,24 @@ class Rollout {
   torch::Tensor is_terminated_;
   torch::Tensor is_truncated_;
   torch::Tensor is_episode_start_;
-  std::vector<bool> is_episode_start_cpu_;
+  // Persistent host mirrors of the four per-env accelerator tensors above.
+  // Mutated on the CPU each step, then uploaded in one bulk copy each,
+  // replacing O(envs) synchronising scalar writes. is_episode_start_cpu_
+  // doubles as the CPU-side gate; uint8_t (not bool) so it is contiguous for
+  // from_blob.
+  std::vector<float> rewards_host_;
+  std::vector<uint8_t> terminated_host_;
+  std::vector<uint8_t> truncated_host_;
+  std::vector<uint8_t> is_episode_start_cpu_;
   std::vector<bool> game_overs_;
   std::vector<float> episode_returns_;
   std::vector<size_t> episode_lengths_;
   std::vector<float> game_returns_;
   std::vector<size_t> game_lengths_;
   torch::Tensor rewards_;
+  // Host copy of the latest selected actions, refreshed once per step so
+  // workers index it without a per-env device->host sync.
+  torch::Tensor actions_cpu_;
   std::function<ActionResult(const torch::Tensor &)> action_selector_;
   torch::Device device_;
 

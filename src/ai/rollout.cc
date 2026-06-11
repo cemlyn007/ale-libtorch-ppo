@@ -80,9 +80,29 @@ Rollout::Rollout(
                                 rom_path_.string());
   }
 
+  // Per-frame observation shape (channels-last for grayscale, CHW for colour)
+  // and its byte count -- the unit each worker writes into the staging buffer.
+  std::vector<int64_t> frame_shape =
+      grayscale_ ? std::vector<int64_t>{static_cast<int64_t>(height_),
+                                        static_cast<int64_t>(width_)}
+                 : std::vector<int64_t>{3, static_cast<int64_t>(height_),
+                                        static_cast<int64_t>(width_)};
+  frame_bytes_ = grayscale_ ? static_cast<int64_t>(height_ * width_)
+                            : static_cast<int64_t>(3 * height_ * width_);
+
+  // One contiguous, genuinely page-locked staging buffer for every env's newest
+  // frame. (from_blob over a std::vector does NOT pin -- pinned_memory only
+  // takes effect on allocating factories like empty(), and only with CUDA.)
+  std::vector<int64_t> staging_shape = {
+      static_cast<int64_t>(total_environments_)};
+  staging_shape.insert(staging_shape.end(), frame_shape.begin(),
+                       frame_shape.end());
+  auto staging_options = torch::TensorOptions(torch::kByte);
+  if (device_.is_cuda()) staging_options = staging_options.pinned_memory(true);
+  staging_ = torch::empty(staging_shape, staging_options);
+  staging_ptr_ = staging_.data_ptr<uint8_t>();
+
   environments_.resize(total_environments_);
-  screen_buffers_.resize(total_environments_);
-  screen_tensor_blobs_.resize(total_environments_);
   std::vector<std::thread> threads;
   for (size_t i = 0; i < total_environments_; ++i) {
     threads.emplace_back([&, i]() {
@@ -92,43 +112,18 @@ Rollout::Rollout(
       CPU_SET(i % std::thread::hardware_concurrency(), &cpuset);
       pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t), &cpuset);
 #endif
-      auto environment =
+      environments_[i] =
           create_environment(i, seed, frame_skip, max_return, video_path);
-      auto screen = environment->get_interface().getScreen();
-      std::vector<int64_t> observation_shape;
-      if (grayscale_) {
-        screen_buffers_[i] = std::vector<unsigned char>(height_ * width_);
-        observation_shape = {static_cast<int64_t>(height_),
-                             static_cast<int64_t>(width_)};
-      } else {
-        screen_buffers_[i] = std::vector<unsigned char>(3 * height_ * width_);
-        observation_shape = {3, static_cast<int64_t>(height_),
-                             static_cast<int64_t>(width_)};
-      }
-      screen_tensor_blobs_[i] = torch::from_blob(
-          screen_buffers_[i].data(), observation_shape,
-          torch::TensorOptions(torch::kByte).pinned_memory(true));
-      environments_[i] = std::move(environment);
     });
   }
   for (auto &thread : threads) thread.join();
-
-  auto screen = environments_[0]->get_interface().getScreen();
-  std::vector<int64_t> observation_shape;
-  if (grayscale_) {
-    observation_shape = {static_cast<int64_t>(height_),
-                         static_cast<int64_t>(width_)};
-  } else {
-    observation_shape = {3, static_cast<int64_t>(height_),
-                         static_cast<int64_t>(width_)};
-  }
 
   auto total = static_cast<int64_t>(total_environments_);
   auto frame = static_cast<int64_t>(frame_stack_);
   auto options = torch::TensorOptions(torch::kFloat32).device(device_);
   std::vector<int64_t> observations_shape({total, frame});
-  observations_shape.insert(observations_shape.end(), observation_shape.begin(),
-                            observation_shape.end());
+  observations_shape.insert(observations_shape.end(), frame_shape.begin(),
+                            frame_shape.end());
 
   observations_ = torch::zeros(observations_shape, options.dtype(torch::kByte));
   is_terminated_ = torch::zeros({total}, options.dtype(torch::kBool));
@@ -136,7 +131,11 @@ Rollout::Rollout(
   is_episode_start_ = torch::ones({total}, options.dtype(torch::kBool));
   rewards_ = torch::zeros({total}, options);
 
-  is_episode_start_cpu_.resize(total_environments_, true);
+  // Host mirrors start matching the accelerator tensors above.
+  rewards_host_.resize(total_environments_, 0.0f);
+  terminated_host_.resize(total_environments_, 0);
+  truncated_host_.resize(total_environments_, 0);
+  is_episode_start_cpu_.resize(total_environments_, 1);
 
   spdlog::info("Creating {} worker threads.", num_workers);
   for (size_t i = 0; i < num_workers; ++i) {
@@ -196,16 +195,32 @@ Rollout::~Rollout() {
 }
 
 void Rollout::update_observations() {
+  // Shift the stack back by one; the oldest frame drops off.
   for (int64_t frame_index = frame_stack_ - 1; frame_index > 0; --frame_index)
     observations_.index_put_(
         {torch::indexing::Slice(), frame_index},
         observations_.index({torch::indexing::Slice(), frame_index - 1}));
-  for (size_t i = 0; i < total_environments_; ++i) {
-    const auto &frame = screen_tensor_blobs_[i];
-    if (is_episode_start_cpu_[i]) observations_.select(0, i).copy_(frame, true);
-  }
-  observations_.index_put_({torch::indexing::Slice(), 0},
-                           torch::stack(screen_tensor_blobs_, 0));
+  // On a fresh episode, prime every stacked frame with the first observation so
+  // the stack isn't polluted by the previous episode's tail.
+  for (size_t i = 0; i < total_environments_; ++i)
+    if (is_episode_start_cpu_[i])
+      observations_.select(0, i).copy_(staging_.select(0, i),
+                                       /*non_blocking=*/true);
+  // Newest frame for every env in a single page-locked H2D upload.
+  observations_.select(1, 0).copy_(staging_, /*non_blocking=*/true);
+}
+
+void Rollout::upload_step_state() {
+  // Wrap the persistent host mirrors (no copy) and push each to its accelerator
+  // tensor in one go. copy_ handles the dtype cast (byte mirror -> bool
+  // tensor).
+  const int64_t n = static_cast<int64_t>(total_environments_);
+  const auto byte = torch::TensorOptions(torch::kByte);
+  rewards_.copy_(torch::from_blob(rewards_host_.data(), {n}, torch::kFloat32));
+  is_terminated_.copy_(torch::from_blob(terminated_host_.data(), {n}, byte));
+  is_truncated_.copy_(torch::from_blob(truncated_host_.data(), {n}, byte));
+  is_episode_start_.copy_(
+      torch::from_blob(is_episode_start_cpu_.data(), {n}, byte));
 }
 
 RolloutResult Rollout::rollout() {
@@ -215,8 +230,10 @@ RolloutResult Rollout::rollout() {
   std::vector<size_t> game_lengths;
 
   for (size_t time_index = 0; time_index < horizon_; time_index++) {
-    // Action Selection
+    // Action Selection. Pull the actions to the host once (one sync) so workers
+    // index them without a per-env device->host copy.
     action_result_ = action_selector_(observations_);
+    actions_cpu_ = action_result_.actions.to(torch::kCPU);
 
     // Step all environments with the selected actions.
     size_t total_steps_increment = 0;
@@ -224,10 +241,10 @@ RolloutResult Rollout::rollout() {
     for (const auto &result : step_results) {
       int64_t ale_index = result.environment_index;
       if (!is_episode_start_cpu_[ale_index]) {
-        // On the accelerator:
-        rewards_[ale_index] = result.reward;
-        is_terminated_[ale_index] = result.terminated;
-        is_truncated_[ale_index] = result.truncated;
+        // Host mirror of the accelerator tensors (uploaded in bulk below):
+        rewards_host_[ale_index] = result.reward;
+        terminated_host_[ale_index] = result.terminated;
+        truncated_host_[ale_index] = result.truncated;
         // On the CPU:
         game_overs_[ale_index] = result.game_over;
         episode_returns_[ale_index] += result.reward;
@@ -237,6 +254,10 @@ RolloutResult Rollout::rollout() {
         total_steps_increment++;
       }
     }
+
+    // Upload this step's per-env state in four bulk copies instead of O(envs)
+    // synchronising scalar writes.
+    upload_step_state();
 
     // Add the observations, and the actions that from those observations led
     // to the rewards and terminal state changes.
@@ -251,12 +272,11 @@ RolloutResult Rollout::rollout() {
     for (const auto &result : step_results) {
       int64_t ale_index = result.environment_index;
       if (result.terminated || result.truncated) {
-        // On the accelerator:
-        is_episode_start_[ale_index] = true;
-        is_terminated_[ale_index] = false;
-        is_truncated_[ale_index] = false;
+        // Accelerator state, via host mirrors (uploaded next step):
+        is_episode_start_cpu_[ale_index] = 1;
+        terminated_host_[ale_index] = 0;
+        truncated_host_[ale_index] = 0;
         // On the CPU:
-        is_episode_start_cpu_[ale_index] = true;
         current_episode_++;
         episode_returns.push_back(episode_returns_[ale_index]);
         episode_lengths.push_back(episode_lengths_[ale_index]);
@@ -269,10 +289,8 @@ RolloutResult Rollout::rollout() {
           game_lengths_[ale_index] = 0;
         }
       } else if (is_episode_start_cpu_[ale_index]) {
-        // On the accelerator:
-        is_episode_start_[ale_index] = false;
-        // On the CPU:
-        is_episode_start_cpu_[ale_index] = false;
+        // Accelerator state, via host mirror (uploaded next step):
+        is_episode_start_cpu_[ale_index] = 0;
       }
     }
     total_steps_ += total_steps_increment;
@@ -321,8 +339,7 @@ StepResult Rollout::step(const size_t environment_index) {
   } else {
     auto &interface = environments_[environment_index]->get_interface();
     auto action_set = interface.getMinimalActionSet();
-    size_t action_index =
-        action_result_.actions[environment_index].item<int64_t>();
+    size_t action_index = actions_cpu_[environment_index].item<int64_t>();
     if (action_index < 0 || action_index >= action_set.size())
       throw std::out_of_range("Action index out of range for environment " +
                               std::to_string(environment_index));
@@ -334,8 +351,8 @@ StepResult Rollout::step(const size_t environment_index) {
     output.truncated = result.truncated;
     output.game_over = result.game_over;
   }
-  std::memcpy(screen_buffers_[environment_index].data(), observation.data(),
-              observation.size());
+  std::memcpy(staging_ptr_ + environment_index * frame_bytes_,
+              observation.data(), observation.size());
   return output;
 }
 }  // namespace ai::rollout

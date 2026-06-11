@@ -56,7 +56,7 @@ cc_test(
     srcs = ["checkpoint-test.cc"],
     copts = googletest_copts,
     deps = [
-        "//src:checkpoint",
+        "//src/ai:checkpoint",
         "@googletest//:gtest_main",
         "@libtorch//:torch",
     ],

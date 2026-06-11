@@ -10,15 +10,15 @@
 #include <ale/common/Log.hpp>
 #include <ale/version.hpp>
 #include <cstdlib>
-#include <limits>
 #include <memory>
 #include <numeric>
+#include <optional>
 #include <type_traits>
 
+#include "ai/checkpoint.h"
 #include "ai/ppo/losses.h"
 #include "ai/rollout.h"
 #include "ai/vision.h"
-#include "checkpoint.h"
 #include "stop_signal.h"
 #include "tensorboard_logger.h"
 
@@ -595,9 +595,11 @@ int main(int argc, char **argv) {
         profiler_config, activities,
         {torch::RecordScope::FUNCTION, torch::RecordScope::USER_SCOPE});
   }
-  // Mean episode return of the best rollout so far; best.pt is rewritten
-  // whenever a rollout beats it.
-  double best_return = -std::numeric_limits<double>::infinity();
+  ai::checkpoint::Checkpointer checkpointer(
+      run_dir, config.checkpoint_interval,
+      [&logger](size_t step, const std::string &text) {
+        logger.add_text("checkpoint", step, text.c_str());
+      });
   for (size_t rollout_index = 0; rollout_index < config.num_rollouts;
        ++rollout_index) {
     if (stop.requested()) {
@@ -617,31 +619,12 @@ int main(int argc, char **argv) {
 
     log_data(logger, result.log, metrics, trainer->learning_rate());
 
-    if (config.checkpoint_interval > 0) {
-      // next_rollout_index is rollout_index + 1 and global_step is the env-step
-      // count so far: both are written so a checkpoint is resume-ready, even
-      // though loading them back to resume a run is a later change.
-      const size_t step = result.log.steps;
-      if (!result.log.episode_returns.empty()) {
-        const double rollout_return = mean(result.log.episode_returns);
-        if (rollout_return > best_return) {
-          best_return = rollout_return;
-          checkpoint::save(run_dir / "best.pt", *network, optimizer,
-                           {rollout_index + 1, best_return, step});
-          logger.add_text("checkpoint", step,
-                          ("best.pt return=" + std::to_string(best_return) +
-                           " rollout=" + std::to_string(rollout_index + 1))
-                              .c_str());
-        }
-      }
-      if ((rollout_index + 1) % config.checkpoint_interval == 0) {
-        checkpoint::save(run_dir / "latest.pt", *network, optimizer,
-                         {rollout_index + 1, best_return, step});
-        logger.add_text(
-            "checkpoint", step,
-            ("latest.pt rollout=" + std::to_string(rollout_index + 1)).c_str());
-      }
-    }
+    checkpointer.on_rollout_end(
+        rollout_index, result.log.steps,
+        result.log.episode_returns.empty()
+            ? std::nullopt
+            : std::optional<double>(mean(result.log.episode_returns)),
+        *network, optimizer);
   }
   if (!profile_path.empty()) {
     auto profiler_result = torch::autograd::profiler::disableProfiler();

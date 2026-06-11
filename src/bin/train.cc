@@ -55,6 +55,9 @@ struct Config {
   // checkpointing) and best.pt whenever mean episode return improves, into a
   // run directory keyed by the same start_time stamp as the tfevents file.
   size_t checkpoint_interval;
+  // Path to a checkpoint .pt to restore network + optimizer + step from; empty
+  // starts fresh.
+  std::string resume_from;
 };
 
 // The single place where YAML keys bind to Config members. Each field keeps its
@@ -87,15 +90,19 @@ void for_each_field(Self &config, Visitor &&visit) {
   visit("cuda_graph", config.cuda_graph);
   visit("deterministic", config.deterministic);
   visit("checkpoint_interval", config.checkpoint_interval);
+  visit("resume_from", config.resume_from);
 }
 
 std::map<std::string, google::protobuf::Value> get_parameters(
     const Config &config, size_t action_size) {
   std::map<std::string, google::protobuf::Value> hparams;
   auto put = [&](const char *name, const auto &field) {
+    using Field = std::decay_t<decltype(field)>;
     google::protobuf::Value value;
-    if constexpr (std::is_same_v<std::decay_t<decltype(field)>, bool>)
+    if constexpr (std::is_same_v<Field, bool>)
       value.set_bool_value(field);
+    else if constexpr (std::is_same_v<Field, std::string>)
+      value.set_string_value(field);
     else
       value.set_number_value(static_cast<double>(field));
     hparams[name] = value;
@@ -137,9 +144,10 @@ std::vector<float> gather(const torch::Tensor &tensor,
   return to_vector(tensor.masked_select(mask));
 }
 
+// `step` is the absolute global env step (log.steps offset by any resumed run's
+// starting step) so a resumed run's curves continue rather than restart at 0.
 void log_data(TensorBoardLogger &logger, const ai::rollout::Log &log,
-              const ai::ppo::train::Metrics &metrics, double lr) {
-  const auto step = log.steps;
+              const ai::ppo::train::Metrics &metrics, double lr, size_t step) {
   const auto &masks = metrics.masks;
   auto scalar = [&](const char *tag, double v) {
     logger.add_scalar(tag, step, v);
@@ -500,11 +508,15 @@ int main(int argc, char **argv) {
   const auto start_time =
       std::chrono::system_clock::now().time_since_epoch().count();
   // A run is a self-contained directory <log_path>.<start_time>/ holding its
-  // event file and its checkpoints, so each run's artifacts stay together.
+  // event file and its checkpoints. Resuming reuses the checkpoint's directory
+  // so the resumed process writes its event file into the same run, which
+  // TensorBoard merges into one continuous timeline.
   const std::filesystem::path log_path = args.log_path;
   const std::filesystem::path run_dir =
-      log_path.parent_path() /
-      (log_path.filename().string() + "." + std::to_string(start_time));
+      config.resume_from.empty()
+          ? log_path.parent_path() / (log_path.filename().string() + "." +
+                                      std::to_string(start_time))
+          : std::filesystem::path(config.resume_from).parent_path();
   const std::filesystem::path logger_path =
       run_dir / (log_path.filename().string() + ".tfevents." +
                  std::to_string(start_time));
@@ -544,6 +556,22 @@ int main(int argc, char **argv) {
   torch::optim::Adam optimizer(
       network->parameters(),
       torch::optim::AdamOptions(config.learning_rate).eps(1e-5));
+
+  // Restore before the initial rollout and any CUDA-graph capture so the graph
+  // captures the resumed weights/optimizer state. The rollout RNG and env state
+  // are not saved, so resumption is approximate, not bit-exact.
+  size_t start_rollout_index = 0;
+  double best_return = -std::numeric_limits<double>::infinity();
+  size_t step_offset = 0;
+  if (!config.resume_from.empty()) {
+    const checkpoint::Checkpoint state =
+        checkpoint::load(config.resume_from, *network, optimizer, device);
+    start_rollout_index = state.next_rollout_index;
+    best_return = state.best_return;
+    step_offset = state.global_step;
+    spdlog::info("Resumed from {} at rollout {} (global step {})",
+                 config.resume_from, start_rollout_index, step_offset);
+  }
 
   ai::rollout::Rollout rollout(
       rom_path, config.total_environments, config.horizon, config.max_steps,
@@ -595,11 +623,8 @@ int main(int argc, char **argv) {
         profiler_config, activities,
         {torch::RecordScope::FUNCTION, torch::RecordScope::USER_SCOPE});
   }
-  // Mean episode return of the best rollout so far; best.pt is rewritten
-  // whenever a rollout beats it.
-  double best_return = -std::numeric_limits<double>::infinity();
-  for (size_t rollout_index = 0; rollout_index < config.num_rollouts;
-       ++rollout_index) {
+  for (size_t rollout_index = start_rollout_index;
+       rollout_index < config.num_rollouts; ++rollout_index) {
     if (stop.requested()) {
       spdlog::info("Stop requested — finalizing and shutting down...");
       break;
@@ -615,13 +640,14 @@ int main(int argc, char **argv) {
     }
     trainer->update(result.batch);
 
-    log_data(logger, result.log, metrics, trainer->learning_rate());
+    // Absolute global step: continues across a resume so the curves don't
+    // restart at 0.
+    const size_t step = step_offset + result.log.steps;
+    log_data(logger, result.log, metrics, trainer->learning_rate(), step);
 
     if (config.checkpoint_interval > 0) {
-      // next_rollout_index is rollout_index + 1 and global_step is the env-step
-      // count so far: both are written so a checkpoint is resume-ready, even
-      // though loading them back to resume a run is a later change.
-      const size_t step = result.log.steps;
+      // next_rollout_index is rollout_index + 1: resuming continues with the
+      // rollout after the one just trained on.
       if (!result.log.episode_returns.empty()) {
         const double rollout_return = mean(result.log.episode_returns);
         if (rollout_return > best_return) {

@@ -25,3 +25,5 @@ cuda_graph: false
 deterministic: true
 # Save latest.pt every N rollouts and best.pt on return improvement; 0 disables.
 checkpoint_interval: 2
+# Path to a checkpoint .pt to resume from; empty starts fresh.
+resume_from: ""

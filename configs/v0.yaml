@@ -23,3 +23,5 @@ record_observation: false
 record_video: true
 cuda_graph: false
 deterministic: true
+# Save latest.pt every N rollouts and best.pt on return improvement; 0 disables.
+checkpoint_interval: 100

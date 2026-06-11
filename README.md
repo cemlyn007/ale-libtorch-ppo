@@ -38,7 +38,15 @@ To run the project, follow these steps:
    - `--group`: Group name used when logging parameters to TensorBoard.
    - `--config`: Path to the YAML file containing the config to use for running the application.
    - `--profile`: Optional path to write a libtorch profile to, which can be examined using Perfetto.
-  
+
+### Checkpointing
+
+Each run is a self-contained directory — `<base>.<start_time>/` — holding its TensorBoard event file and its checkpoints (`latest.pt`, `best.pt`). One config key controls checkpointing (see any file in `configs/`):
+
+* `checkpoint_interval`: write `latest.pt` every N rollouts, and `best.pt` whenever the mean episode return improves. `0` disables checkpointing entirely.
+
+A checkpoint bundles the network weights, optimizer (Adam) state, the rollout index, and the env step. Each save also drops a `checkpoint` text marker on the TensorBoard timeline so saves are visible there. Loading a checkpoint to resume a run is not wired up yet.
+
 ## Results
 Evaluated using the following hardware:
 * ASUS ROG STRIX X670E-F GAMING WIFI

@@ -10,6 +10,7 @@
 #include <ale/common/Log.hpp>
 #include <ale/version.hpp>
 #include <cstdlib>
+#include <limits>
 #include <memory>
 #include <numeric>
 #include <type_traits>
@@ -17,6 +18,7 @@
 #include "ai/ppo/losses.h"
 #include "ai/rollout.h"
 #include "ai/vision.h"
+#include "checkpoint.h"
 #include "stop_signal.h"
 #include "tensorboard_logger.h"
 
@@ -49,6 +51,10 @@ struct Config {
   bool record_video;
   bool cuda_graph;
   bool deterministic;
+  // Write latest.pt every `checkpoint_interval` rollouts (0 disables all
+  // checkpointing) and best.pt whenever mean episode return improves, into a
+  // run directory keyed by the same start_time stamp as the tfevents file.
+  size_t checkpoint_interval;
 };
 
 // The single place where YAML keys bind to Config members. Each field keeps its
@@ -80,6 +86,7 @@ void for_each_field(Self &config, Visitor &&visit) {
   visit("record_video", config.record_video);
   visit("cuda_graph", config.cuda_graph);
   visit("deterministic", config.deterministic);
+  visit("checkpoint_interval", config.checkpoint_interval);
 }
 
 std::map<std::string, google::protobuf::Value> get_parameters(
@@ -492,9 +499,15 @@ int main(int argc, char **argv) {
 
   const auto start_time =
       std::chrono::system_clock::now().time_since_epoch().count();
-  const auto logger_path =
-      std::filesystem::path(args.log_path)
-          .replace_extension("tfevents." + std::to_string(start_time));
+  // A run is a self-contained directory <log_path>.<start_time>/ holding its
+  // event file and its checkpoints, so each run's artifacts stay together.
+  const std::filesystem::path log_path = args.log_path;
+  const std::filesystem::path run_dir =
+      log_path.parent_path() /
+      (log_path.filename().string() + "." + std::to_string(start_time));
+  const std::filesystem::path logger_path =
+      run_dir / (log_path.filename().string() + ".tfevents." +
+                 std::to_string(start_time));
 
   torch::Device device(torch::kCPU);
   if (torch::cuda::is_available()) {
@@ -582,6 +595,9 @@ int main(int argc, char **argv) {
         profiler_config, activities,
         {torch::RecordScope::FUNCTION, torch::RecordScope::USER_SCOPE});
   }
+  // Mean episode return of the best rollout so far; best.pt is rewritten
+  // whenever a rollout beats it.
+  double best_return = -std::numeric_limits<double>::infinity();
   for (size_t rollout_index = 0; rollout_index < config.num_rollouts;
        ++rollout_index) {
     if (stop.requested()) {
@@ -600,6 +616,32 @@ int main(int argc, char **argv) {
     trainer->update(result.batch);
 
     log_data(logger, result.log, metrics, trainer->learning_rate());
+
+    if (config.checkpoint_interval > 0) {
+      // next_rollout_index is rollout_index + 1 and global_step is the env-step
+      // count so far: both are written so a checkpoint is resume-ready, even
+      // though loading them back to resume a run is a later change.
+      const size_t step = result.log.steps;
+      if (!result.log.episode_returns.empty()) {
+        const double rollout_return = mean(result.log.episode_returns);
+        if (rollout_return > best_return) {
+          best_return = rollout_return;
+          checkpoint::save(run_dir / "best.pt", *network, optimizer,
+                           {rollout_index + 1, best_return, step});
+          logger.add_text("checkpoint", step,
+                          ("best.pt return=" + std::to_string(best_return) +
+                           " rollout=" + std::to_string(rollout_index + 1))
+                              .c_str());
+        }
+      }
+      if ((rollout_index + 1) % config.checkpoint_interval == 0) {
+        checkpoint::save(run_dir / "latest.pt", *network, optimizer,
+                         {rollout_index + 1, best_return, step});
+        logger.add_text(
+            "checkpoint", step,
+            ("latest.pt rollout=" + std::to_string(rollout_index + 1)).c_str());
+      }
+    }
   }
   if (!profile_path.empty()) {
     auto profiler_result = torch::autograd::profiler::disableProfiler();

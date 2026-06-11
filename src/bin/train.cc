@@ -496,8 +496,24 @@ int main(int argc, char **argv) {
         profiler_config, activities,
         {torch::RecordScope::FUNCTION, torch::RecordScope::USER_SCOPE});
   }
-  for (size_t rollout_index = start_rollout_index;
-       rollout_index < config.num_rollouts; ++rollout_index) {
+  // Write latest.pt for the just-completed rollout. Called at each interval and
+  // once more on exit, so the newest weights survive a graceful stop or a run
+  // that finishes between intervals — not just the last interval multiple.
+  auto save_latest = [&](size_t next_rollout_index, size_t step,
+                         const char *reason) {
+    checkpoint::save(run_dir / "latest.pt", *network, optimizer,
+                     {next_rollout_index, best_return, step});
+    logger.add_text("checkpoint", step,
+                    ("latest.pt rollout=" + std::to_string(next_rollout_index) +
+                     " (" + reason + ")")
+                        .c_str());
+  };
+  // Set whenever a completed rollout has not yet been flushed to latest.pt, so
+  // the post-loop flush knows there is newer progress than the last interval.
+  bool pending_latest = false;
+  size_t latest_step = step_offset;
+  size_t rollout_index = start_rollout_index;
+  for (; rollout_index < config.num_rollouts; ++rollout_index) {
     if (stop.requested()) {
       spdlog::info("Stop requested — finalizing and shutting down...");
       break;
@@ -534,6 +550,7 @@ int main(int argc, char **argv) {
     // Absolute global step: continues across a resume so the curves don't
     // restart at 0.
     const size_t step = step_offset + result.log.steps;
+    latest_step = step;
     log_data(logger, result.log, metrics,
              static_cast<torch::optim::AdamOptions &>(
                  optimizer.param_groups()[0].options())
@@ -556,13 +573,19 @@ int main(int argc, char **argv) {
         }
       }
       if ((rollout_index + 1) % config.checkpoint_interval == 0) {
-        checkpoint::save(run_dir / "latest.pt", *network, optimizer,
-                         {rollout_index + 1, best_return, step});
-        logger.add_text(
-            "checkpoint", step,
-            ("latest.pt rollout=" + std::to_string(rollout_index + 1)).c_str());
+        save_latest(rollout_index + 1, step, "interval");
+        pending_latest = false;
+      } else {
+        pending_latest = true;
       }
     }
+  }
+  // A graceful stop breaks before the next interval, and a clean run can finish
+  // between intervals; either way flush the last completed rollout so latest.pt
+  // holds the newest weights. Here `rollout_index` is its next_rollout_index.
+  if (config.checkpoint_interval > 0 && pending_latest) {
+    save_latest(rollout_index, latest_step,
+                stop.requested() ? "shutdown" : "final");
   }
   if (!profile_path.empty()) {
     auto profiler_result = torch::autograd::profiler::disableProfiler();

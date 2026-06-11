@@ -32,7 +32,11 @@ done
 # branch. Copying the main checkout's index is wrong: its `directory` and the
 # absolute execroot paths baked into each command point at the main tree, not
 # this worktree, so clangd would resolve sources against the wrong checkout
-# until the first refresh overwrote it.
-( cd "$DIR" && bazel run //:refresh_compile_commands >&2 )
+# until the first refresh overwrote it. Don't let a refresh failure abort the
+# hook (set -e) before we print $DIR — a missing index is a clangd nicety, but
+# no stdout means Claude Code can't locate the worktree. SessionStart's refresh
+# retries when the index is missing anyway.
+( cd "$DIR" && bazel run //:refresh_compile_commands >&2 ) \
+  || echo "warning: refresh_compile_commands failed; clangd index not seeded" >&2
 
 echo "$DIR"

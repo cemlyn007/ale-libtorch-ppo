@@ -35,6 +35,7 @@ struct Config {
   long num_epochs;
   long mini_batch_size;
   long num_mini_batches;
+  bool shuffle_mini_batches;
   float gae_discount;
   float gae_lambda;
   float max_gradient_norm;
@@ -74,6 +75,7 @@ void for_each_field(Self &config, Visitor &&visit) {
   visit("num_epochs", config.num_epochs);
   visit("mini_batch_size", config.mini_batch_size);
   visit("num_mini_batches", config.num_mini_batches);
+  visit("shuffle_mini_batches", config.shuffle_mini_batches);
   visit("gae_discount", config.gae_discount);
   visit("gae_lambda", config.gae_lambda);
   visit("max_gradient_norm", config.max_gradient_norm);
@@ -264,7 +266,7 @@ ai::ppo::train::Batch prepare_batch(ai::buffer::Batch &batch) {
 ai::ppo::train::Hyperparameters prepare_hyperparameters(const Config &config) {
   ai::ppo::train::Hyperparameters hp = {
       config.clip_param, config.value_loss_coef, config.entropy_coef,
-      config.max_gradient_norm};
+      config.max_gradient_norm, config.shuffle_mini_batches};
   return hp;
 }
 

@@ -30,6 +30,9 @@ struct Hyperparameters {
   float value_loss_coef;
   float entropy_coef;
   float max_gradient_norm;
+  // When false, mini-batches are contiguous env-major slices (correlated but
+  // cheaper: no randperm/gather) instead of random permutations.
+  bool shuffle_mini_batches;
 };
 
 struct Batch {
@@ -39,6 +42,13 @@ struct Batch {
   torch::Tensor advantages;
   torch::Tensor returns;
   torch::Tensor masks;
+
+  Batch slice(int64_t start, int64_t end) const {
+    return {
+        observations.slice(0, start, end),      actions.slice(0, start, end),
+        log_probabilities.slice(0, start, end), advantages.slice(0, start, end),
+        returns.slice(0, start, end),           masks.slice(0, start, end)};
+  }
 
   Batch index_select(const torch::Tensor &index) const {
     return {observations.index_select(0, index),
@@ -149,12 +159,15 @@ void train(Network &network, torch::optim::Optimizer &optimizer,
   for (size_t epoch_index = 0; epoch_index < num_epochs; epoch_index++) {
     // Refilling a preallocated indices tensor keeps shapes static, so this
     // stays CUDA-graph capturable (RNG state is handled by graph capture).
-    torch::randperm_out(indices, size);
+    if (hyperparameters.shuffle_mini_batches)
+      torch::randperm_out(indices, size);
     for (size_t mini_batch_index = 0; mini_batch_index < num_mini_batches;
          mini_batch_index++) {
       auto start = mini_batch_index * mini_batch_size;
       auto end = start + mini_batch_size;
-      Batch mini_batch = batch.index_select(indices.slice(0, start, end));
+      Batch mini_batch = hyperparameters.shuffle_mini_batches
+                             ? batch.index_select(indices.slice(0, start, end))
+                             : batch.slice(start, end);
       MiniBatchUpdateResult result =
           mini_batch_update(network, optimizer, mini_batch, hyperparameters);
       metrics.set(epoch_index, mini_batch_index, result, mini_batch);

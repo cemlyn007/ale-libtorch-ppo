@@ -1,7 +1,7 @@
-#include "ai/ppo/train.h"
-
 #include <gtest/gtest.h>
 #include <torch/torch.h>
+
+#include "ai/ppo/train.h"
 
 namespace {
 
@@ -50,12 +50,14 @@ TEST(PpoTrainTest, MiniBatchesAreShuffledPermutationsEachEpoch) {
       torch::ones({size}, torch::kBool)};
 
   torch::Tensor indices = torch::empty({size}, torch::kLong);
-  ai::ppo::train::Metrics metrics(num_epochs, num_mini_batches,
-                                  mini_batch_size, torch::Device(torch::kCPU));
-  ai::ppo::train::Hyperparameters hyperparameters = {0.2f, 0.5f, 0.01f, 0.5f};
+  ai::ppo::train::Metrics metrics(num_epochs, num_mini_batches, mini_batch_size,
+                                  torch::Device(torch::kCPU));
+  ai::ppo::train::Hyperparameters hyperparameters = {
+      0.2f, 0.5f, 0.01f, 0.5f,
+      /*shuffle_mini_batches=*/true};
 
-  ai::ppo::train::train(network, optimizer, metrics, indices, batch,
-                        num_epochs, num_mini_batches, hyperparameters);
+  ai::ppo::train::train(network, optimizer, metrics, indices, batch, num_epochs,
+                        num_mini_batches, hyperparameters);
 
   auto identity = torch::arange(size, torch::kFloat);
   for (size_t epoch = 0; epoch < num_epochs; ++epoch) {
@@ -69,6 +71,44 @@ TEST(PpoTrainTest, MiniBatchesAreShuffledPermutationsEachEpoch) {
   }
   EXPECT_FALSE(torch::equal(metrics.advantages[0], metrics.advantages[1]))
       << "epochs reused the same permutation";
+}
+
+TEST(PpoTrainTest, ContiguousMiniBatchesWhenShufflingDisabled) {
+  torch::manual_seed(0);
+  constexpr int64_t size = 32;
+  constexpr int64_t observation_size = 4;
+  constexpr int64_t action_size = 3;
+  constexpr size_t num_epochs = 2;
+  constexpr size_t num_mini_batches = 4;
+  constexpr int64_t mini_batch_size = size / num_mini_batches;
+
+  Policy network(observation_size, action_size);
+  torch::optim::Adam optimizer(network->parameters(),
+                               torch::optim::AdamOptions(1e-3));
+
+  ai::ppo::train::Batch batch = {
+      torch::randn({size, observation_size}),
+      torch::randint(0, action_size, {size}, torch::kLong),
+      ai::ppo::losses::normalize_logits(torch::randn({size, action_size})),
+      torch::arange(size, torch::kFloat),
+      torch::randn({size}),
+      torch::ones({size}, torch::kBool)};
+
+  torch::Tensor indices = torch::empty({size}, torch::kLong);
+  ai::ppo::train::Metrics metrics(num_epochs, num_mini_batches, mini_batch_size,
+                                  torch::Device(torch::kCPU));
+  ai::ppo::train::Hyperparameters hyperparameters = {
+      0.2f, 0.5f, 0.01f, 0.5f, /*shuffle_mini_batches=*/false};
+
+  ai::ppo::train::train(network, optimizer, metrics, indices, batch, num_epochs,
+                        num_mini_batches, hyperparameters);
+
+  auto identity = torch::arange(size, torch::kFloat);
+  for (size_t epoch = 0; epoch < num_epochs; ++epoch) {
+    EXPECT_TRUE(torch::equal(metrics.advantages[epoch].flatten(), identity))
+        << "epoch " << epoch
+        << " did not visit samples in contiguous env-major order";
+  }
 }
 
 #ifdef __linux__
@@ -101,9 +141,11 @@ TEST(PpoTrainTest, CudaGraphCaptureShufflesMiniBatches) {
       torch::ones({size}, options.dtype(torch::kBool))};
 
   torch::Tensor indices = torch::empty({size}, options.dtype(torch::kLong));
-  ai::ppo::train::Metrics metrics(num_epochs, num_mini_batches,
-                                  mini_batch_size, device);
-  ai::ppo::train::Hyperparameters hyperparameters = {0.2f, 0.5f, 0.01f, 0.5f};
+  ai::ppo::train::Metrics metrics(num_epochs, num_mini_batches, mini_batch_size,
+                                  device);
+  ai::ppo::train::Hyperparameters hyperparameters = {
+      0.2f, 0.5f, 0.01f, 0.5f,
+      /*shuffle_mini_batches=*/true};
 
   at::cuda::CUDAGraph graph;
   network->train();
@@ -150,10 +192,12 @@ TEST(PpoTrainTest, RejectsIndivisibleMiniBatchCount) {
       torch::ones({10}, torch::kBool)};
   torch::Tensor indices = torch::empty({10}, torch::kLong);
   ai::ppo::train::Metrics metrics(1, 3, 3, torch::Device(torch::kCPU));
-  ai::ppo::train::Hyperparameters hyperparameters = {0.2f, 0.5f, 0.01f, 0.5f};
+  ai::ppo::train::Hyperparameters hyperparameters = {
+      0.2f, 0.5f, 0.01f, 0.5f,
+      /*shuffle_mini_batches=*/true};
   EXPECT_THROW(ai::ppo::train::train(network, optimizer, metrics, indices,
                                      batch, 1, 3, hyperparameters),
                std::runtime_error);
 }
 
-} // namespace
+}  // namespace

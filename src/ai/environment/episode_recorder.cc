@@ -3,7 +3,7 @@
 namespace ai::environment {
 
 EpisodeRecorder::EpisodeRecorder(std::unique_ptr<VirtualEnvironment> env,
-                                 const std::filesystem::path &video_path,
+                                 const std::filesystem::path& video_path,
                                  bool grayscale)
     : env_(std::move(env)),
       grayscale_(grayscale),
@@ -30,21 +30,21 @@ ScreenBuffer EpisodeRecorder::reset() {
   std::filesystem::path path =
       "episode_" + std::to_string(episode_index_) + ".mp4";
   video_recorder_.open(path);
-  video_recorder_.write(buffer_.data());
+  video_recorder_.write(buffer_);
   return observation;
 }
 
-Step EpisodeRecorder::step(const ale::Action &action, bool want_observation) {
+Step EpisodeRecorder::step(const ale::Action& action, bool want_observation) {
   // The recorder grabs its own full-resolution screen via the interface, so
   // the observation flag just passes through.
   auto result = env_->step(action, want_observation);
   update_buffer();
-  video_recorder_.write(buffer_.data());
+  video_recorder_.write(buffer_);
   if (result.terminated || result.truncated) video_recorder_.close();
   return result;
 }
 
-ale::ALEInterface &EpisodeRecorder::get_interface() {
+ale::ALEInterface& EpisodeRecorder::get_interface() {
   return env_->get_interface();
 }
 

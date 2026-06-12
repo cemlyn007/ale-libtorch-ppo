@@ -2,26 +2,12 @@
 
 #include <torch/torch.h>
 
+#include <ale/ale_interface.hpp>
 #include <cstdlib>
 #include <filesystem>
 #include <stdexcept>
 
 #include "gtest/gtest.h"
-
-namespace {
-
-// Breakout's minimal action set: NOOP, FIRE, RIGHT, LEFT.
-constexpr int64_t kBreakoutActionSetSize = 4;
-
-// Always selects action 0 (NOOP), with the shapes Rollout/Buffer expect.
-ai::rollout::ActionResult zero_action_selector(
-    const torch::Tensor &observations) {
-  const int64_t n = observations.size(0);
-  return {torch::zeros({n}, torch::kLong),
-          torch::zeros({n, kBreakoutActionSetSize}), torch::zeros({n})};
-}
-
-}  // namespace
 
 class RolloutTest : public ::testing::Test {
  protected:
@@ -35,13 +21,31 @@ class RolloutTest : public ::testing::Test {
         << "ROM file not found: " << rom_path_;
   }
 
-  void construct_rollout(size_t total_environments, size_t worker_batch_size) {
-    ai::rollout::Rollout rollout(
-        rom_path_, total_environments, /*horizon=*/1, /*max_steps=*/1000,
-        /*frame_stack=*/1, /*grayscale=*/true, zero_action_selector,
-        /*gae_discount=*/0.99f, /*gae_lambda=*/0.95f, torch::kCPU, /*seed=*/42,
-        /*num_workers=*/1, worker_batch_size, /*frame_skip=*/4);
+  // Small CPU rollout whose selector always picks action 0; logits are sized
+  // from the ROM's minimal action set so Buffer::add accepts them.
+  ai::rollout::Rollout construct_rollout(size_t total_environments,
+                                         size_t num_workers,
+                                         size_t worker_batch_size) {
+    ale::ALEInterface ale;
+    ale.loadROM(rom_path_);
+    const auto action_size =
+        static_cast<int64_t>(ale.getMinimalActionSet().size());
+    return ai::rollout::Rollout(
+        rom_path_, total_environments, kHorizon, /*max_steps=*/1000,
+        /*frame_stack=*/4, /*grayscale=*/true,
+        [action_size](
+            const torch::Tensor &observations) -> ai::rollout::ActionResult {
+          const int64_t batch = observations.size(0);
+          return {torch::zeros({batch}, torch::kLong),
+                  torch::zeros({batch, action_size}), torch::zeros({batch})};
+        },
+        /*gae_discount=*/0.99f, /*gae_lambda=*/0.95f,
+        torch::Device(torch::kCPU), /*seed=*/42, num_workers, worker_batch_size,
+        /*frame_skip=*/4);
   }
+
+  static constexpr size_t kTotalEnvironments = 2;
+  static constexpr size_t kHorizon = 4;
 
   std::filesystem::path rom_path_;
 };
@@ -50,27 +54,56 @@ class RolloutTest : public ::testing::Test {
 // final sub-batch no worker can ever pop, deadlocking step_all(); the
 // constructor must reject it up front.
 TEST_F(RolloutTest, ThrowsWhenWorkerBatchSizeDoesNotDivideTotalEnvironments) {
-  EXPECT_THROW(construct_rollout(/*total_environments=*/4,
+  EXPECT_THROW(construct_rollout(/*total_environments=*/4, /*num_workers=*/1,
                                  /*worker_batch_size=*/3),
                std::invalid_argument);
 }
 
 TEST_F(RolloutTest, ThrowsWhenWorkerBatchSizeIsZero) {
-  EXPECT_THROW(construct_rollout(/*total_environments=*/4,
+  EXPECT_THROW(construct_rollout(/*total_environments=*/4, /*num_workers=*/1,
                                  /*worker_batch_size=*/0),
                std::invalid_argument);
 }
 
-// Positive control: a dividing batch size constructs and completes a rollout.
-TEST_F(RolloutTest, DivisibleWorkerBatchSizeRollsOut) {
-  ai::rollout::Rollout rollout(
-      rom_path_, /*total_environments=*/2, /*horizon=*/2, /*max_steps=*/1000,
-      /*frame_stack=*/1, /*grayscale=*/true, zero_action_selector,
-      /*gae_discount=*/0.99f, /*gae_lambda=*/0.95f, torch::kCPU, /*seed=*/42,
-      /*num_workers=*/1, /*worker_batch_size=*/2, /*frame_skip=*/4);
+// With zero workers nothing ever services the action queue, so the first
+// step_all() would block forever; the constructor must reject it instead.
+TEST_F(RolloutTest, ZeroWorkersThrows) {
+  EXPECT_THROW(construct_rollout(kTotalEnvironments, /*num_workers=*/0,
+                                 /*worker_batch_size=*/1),
+               std::invalid_argument);
+}
+
+// A fully-constructed Rollout destroyed before rollout() ever runs must shut
+// down cleanly: action_result_ is only assigned inside rollout(), and fill_
+// on the undefined tensor would throw inside the noexcept destructor and
+// terminate the process.
+TEST_F(RolloutTest, DestroyBeforeFirstRollout) {
+  {
+    auto rollout = construct_rollout(kTotalEnvironments, /*num_workers=*/1,
+                                     /*worker_batch_size=*/1);
+  }
+  SUCCEED();
+}
+
+// Destruction after a completed rollout exercises the defined-tensor branch
+// of the destructor as well as the normal worker shutdown.
+TEST_F(RolloutTest, RolloutThenDestroy) {
+  auto rollout = construct_rollout(kTotalEnvironments, /*num_workers=*/1,
+                                   /*worker_batch_size=*/1);
   const auto result = rollout.rollout();
-  // The first step of each env is its episode-start reset, which is not
-  // counted; only the second step is.
-  EXPECT_EQ(result.log.steps, 2u);
+  EXPECT_EQ(result.batch.observations.size(0),
+            static_cast<int64_t>(kTotalEnvironments));
+  EXPECT_EQ(result.batch.observations.size(1), static_cast<int64_t>(kHorizon));
+  EXPECT_GT(result.log.steps, 0u);
+}
+
+// Positive control for the divisibility check: a batch size that spans all
+// environments at once constructs and completes a rollout, with exact step
+// accounting (each env's first add is its episode-start reset, not counted).
+TEST_F(RolloutTest, DivisibleWorkerBatchSizeRollsOut) {
+  auto rollout = construct_rollout(kTotalEnvironments, /*num_workers=*/1,
+                                   /*worker_batch_size=*/kTotalEnvironments);
+  const auto result = rollout.rollout();
+  EXPECT_EQ(result.log.steps, (kHorizon - 1) * kTotalEnvironments);
   EXPECT_EQ(result.log.episodes, 0u);
 }

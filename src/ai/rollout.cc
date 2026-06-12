@@ -84,6 +84,11 @@ Rollout::Rollout(
                                 ") must be divisible by worker batch size (" +
                                 std::to_string(batch_size_) + ").");
   }
+  // With zero workers nothing services action_queue_, so the first step_all()
+  // would block forever.
+  if (num_workers == 0) {
+    throw std::invalid_argument("Number of workers must be greater than 0.");
+  }
   if (rom_path_.empty()) {
     throw std::invalid_argument("ROM path must not be empty.");
   }
@@ -188,10 +193,11 @@ Rollout::create_environment(
   environment = std::make_unique<ai::environment::ResizeEnvironment>(
       std::move(environment), width_, height_);
   // Above Resize so it records exactly what the agent sees (pooled + resized).
+  // One observation per skip window, so real-time playback is 60/frame_skip.
   if (i == 0 && video_path.has_value() && record_observation_)
     environment = std::make_unique<ai::environment::EpisodeObservationRecorder>(
         std::move(environment), video_path.value(), grayscale_ ? 1 : 3, height_,
-        width_);
+        width_, 60 / frame_skip);
   environment =
       std::make_unique<ai::environment::EpisodeLife>(std::move(environment));
   environment =
@@ -202,7 +208,11 @@ Rollout::create_environment(
 Rollout::~Rollout() {
   stop_ = true;
   std::vector<size_t> inputs(total_environments_);
-  action_result_.actions.fill_(ale::Action::RANDOM);
+  // actions is only assigned in rollout(); fill_ on the undefined tensor would
+  // throw inside this noexcept destructor. Skipping it is safe: episode starts
+  // are all true below, so workers take the reset path and never read actions.
+  if (action_result_.actions.defined())
+    action_result_.actions.fill_(ale::Action::RANDOM);
   is_episode_start_cpu_.assign(total_environments_, true);
   for (size_t i = 0; i < total_environments_; ++i) inputs[i] = i;
   action_queue_.push(inputs);

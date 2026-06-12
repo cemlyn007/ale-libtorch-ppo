@@ -176,10 +176,11 @@ Rollout::create_environment(
   environment = std::make_unique<ai::environment::ResizeEnvironment>(
       std::move(environment), width_, height_);
   // Above Resize so it records exactly what the agent sees (pooled + resized).
+  // One observation per skip window, so real-time playback is 60/frame_skip.
   if (i == 0 && video_path.has_value() && record_observation_)
     environment = std::make_unique<ai::environment::EpisodeObservationRecorder>(
         std::move(environment), video_path.value(), grayscale_ ? 1 : 3, height_,
-        width_);
+        width_, 60 / frame_skip);
   environment =
       std::make_unique<ai::environment::EpisodeLife>(std::move(environment));
   environment =

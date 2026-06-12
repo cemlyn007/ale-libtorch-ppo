@@ -72,6 +72,18 @@ Rollout::Rollout(
   if (frame_stack_ == 0) {
     throw std::invalid_argument("Frame stack must be greater than 0.");
   }
+  if (batch_size_ == 0) {
+    throw std::invalid_argument("Worker batch size must be greater than 0.");
+  }
+  // Workers pop fixed batches of batch_size_ from the action queue; a
+  // remainder sub-batch never satisfies any worker's pop predicate, so
+  // step_all() would deadlock waiting for the missing results.
+  if (total_environments_ % batch_size_ != 0) {
+    throw std::invalid_argument("Total environments (" +
+                                std::to_string(total_environments_) +
+                                ") must be divisible by worker batch size (" +
+                                std::to_string(batch_size_) + ").");
+  }
   // With zero workers nothing services action_queue_, so the first step_all()
   // would block forever.
   if (num_workers == 0) {

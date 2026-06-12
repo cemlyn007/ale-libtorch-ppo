@@ -74,3 +74,17 @@ cc_test(
         "@libtorch//:torch",
     ],
 )
+
+cc_test(
+    name = "rollout-test",
+    srcs = ["rollout-test.cc"],
+    copts = googletest_copts,
+    data = [
+        "//:roms",
+    ],
+    deps = [
+        "//src/ai:rollout",
+        "@googletest//:gtest_main",
+        "@libtorch//:torch",
+    ],
+)

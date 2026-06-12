@@ -72,6 +72,11 @@ Rollout::Rollout(
   if (frame_stack_ == 0) {
     throw std::invalid_argument("Frame stack must be greater than 0.");
   }
+  // With zero workers nothing services action_queue_, so the first step_all()
+  // would block forever.
+  if (num_workers == 0) {
+    throw std::invalid_argument("Number of workers must be greater than 0.");
+  }
   if (rom_path_.empty()) {
     throw std::invalid_argument("ROM path must not be empty.");
   }
@@ -191,7 +196,11 @@ Rollout::create_environment(
 Rollout::~Rollout() {
   stop_ = true;
   std::vector<size_t> inputs(total_environments_);
-  action_result_.actions.fill_(ale::Action::RANDOM);
+  // actions is only assigned in rollout(); fill_ on the undefined tensor would
+  // throw inside this noexcept destructor. Skipping it is safe: episode starts
+  // are all true below, so workers take the reset path and never read actions.
+  if (action_result_.actions.defined())
+    action_result_.actions.fill_(ale::Action::RANDOM);
   is_episode_start_cpu_.assign(total_environments_, true);
   for (size_t i = 0; i < total_environments_; ++i) inputs[i] = i;
   action_queue_.push(inputs);

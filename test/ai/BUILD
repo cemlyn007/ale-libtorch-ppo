@@ -14,6 +14,7 @@ cc_test(
     ],
     deps = [
         "//src/ai/environment",
+        "//src/ai/environment:max_and_skip",
         "@googletest//:gtest_main",
     ],
 )
@@ -24,6 +25,18 @@ cc_test(
     copts = googletest_copts,
     deps = [
         "//src:ai",
+        "@googletest//:gtest_main",
+        "@libtorch//:torch",
+    ],
+)
+
+cc_test(
+    name = "ppo-train-test",
+    srcs = ["ppo-train-test.cc"],
+    # train.h pulls in c10/cuda/CUDAEvent.h; see //src/ai/ppo:train.
+    copts = googletest_copts + ["-Wno-error=interference-size"],
+    deps = [
+        "//src/ai/ppo",
         "@googletest//:gtest_main",
         "@libtorch//:torch",
     ],
@@ -56,7 +69,21 @@ cc_test(
     srcs = ["checkpoint-test.cc"],
     copts = googletest_copts,
     deps = [
-        "//src:checkpoint",
+        "//src/ai:checkpoint",
+        "@googletest//:gtest_main",
+        "@libtorch//:torch",
+    ],
+)
+
+cc_test(
+    name = "rollout-test",
+    srcs = ["rollout-test.cc"],
+    copts = googletest_copts,
+    data = [
+        "//:roms",
+    ],
+    deps = [
+        "//src/ai:rollout",
         "@googletest//:gtest_main",
         "@libtorch//:torch",
     ],

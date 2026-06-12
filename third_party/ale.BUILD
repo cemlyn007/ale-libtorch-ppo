@@ -38,6 +38,7 @@ _BASE_COPTS = [
     "-Wno-unused-variable",
     "-Wno-sequence-point",
     "-Wno-sign-compare",
+    "-Wno-stringop-overflow",
 ]
 
 # PGO for the emulator hot loop (~+10% stepping throughput), selected via

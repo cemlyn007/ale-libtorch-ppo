@@ -3,8 +3,13 @@
 
 #include <cstddef>
 #include <filesystem>
+#include <functional>
+#include <limits>
+#include <optional>
+#include <string>
+#include <utility>
 
-namespace checkpoint {
+namespace ai::checkpoint {
 
 // Everything needed to resume a run: model weights, optimizer moments, the next
 // rollout to run (so the LR schedule continues), and the best return seen so
@@ -66,4 +71,59 @@ inline Checkpoint load(const std::filesystem::path &path,
           best_return.toDouble(), static_cast<size_t>(global_step.toInt())};
 }
 
-}  // namespace checkpoint
+// Owns the per-run checkpoint policy so the training loop only reports rollout
+// results: writes best.pt whenever the mean episode return improves and
+// latest.pt every `interval` rollouts into `run_dir`. An interval of 0 disables
+// checkpointing entirely.
+class Checkpointer {
+ public:
+  // Called once per file written with the global step and a human-readable
+  // description, so the caller can surface writes (e.g. to TensorBoard)
+  // without this class depending on a logger.
+  using Announce = std::function<void(size_t step, const std::string &)>;
+
+  Checkpointer(std::filesystem::path run_dir, size_t interval,
+               Announce announce = {})
+      : run_dir_(std::move(run_dir)),
+        interval_(interval),
+        announce_(std::move(announce)) {}
+
+  // Mean episode return of the best rollout so far.
+  double best_return() const { return best_return_; }
+
+  // rollout_return is empty when the rollout finished no episodes, in which
+  // case best.pt cannot be judged and only the latest.pt cadence applies.
+  void on_rollout_end(size_t rollout_index, size_t global_step,
+                      std::optional<double> rollout_return,
+                      const torch::nn::Module &network,
+                      const torch::optim::Adam &optimizer) {
+    if (interval_ == 0) return;
+    const size_t next_rollout_index = rollout_index + 1;
+    if (rollout_return.has_value() && *rollout_return > best_return_) {
+      best_return_ = *rollout_return;
+      save(run_dir_ / "best.pt", network, optimizer,
+           {next_rollout_index, best_return_, global_step});
+      announce(global_step,
+               "best.pt return=" + std::to_string(best_return_) +
+                   " rollout=" + std::to_string(next_rollout_index));
+    }
+    if (next_rollout_index % interval_ == 0) {
+      save(run_dir_ / "latest.pt", network, optimizer,
+           {next_rollout_index, best_return_, global_step});
+      announce(global_step,
+               "latest.pt rollout=" + std::to_string(next_rollout_index));
+    }
+  }
+
+ private:
+  void announce(size_t step, const std::string &text) {
+    if (announce_) announce_(step, text);
+  }
+
+  std::filesystem::path run_dir_;
+  size_t interval_;
+  Announce announce_;
+  double best_return_ = -std::numeric_limits<double>::infinity();
+};
+
+}  // namespace ai::checkpoint

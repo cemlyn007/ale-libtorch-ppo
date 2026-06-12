@@ -12,7 +12,7 @@ ScreenBuffer EpisodeLife::reset() {
     game_over_ = false;
   } else {
     auto step_result = env_->step(ale::Action::PLAYER_A_NOOP);
-    observation = step_result.observation;
+    observation = std::move(step_result.observation);
     game_over_ = step_result.game_over;
     if (step_result.terminated || step_result.truncated) {
       observation = env_->reset();
@@ -23,12 +23,12 @@ ScreenBuffer EpisodeLife::reset() {
   return observation;
 }
 
-Step EpisodeLife::step(const ale::Action &action) {
+Step EpisodeLife::step(const ale::Action &action, bool want_observation) {
   if (game_over_)
     throw std::runtime_error("Cannot step in a game that is over.");
   if (lives_ <= 0)
     throw std::runtime_error("No lives left in the environment.");
-  auto result = env_->step(action);
+  auto result = env_->step(action, want_observation);
   int new_lives = env_->get_interface().lives();
   bool life_lost = new_lives < lives_;
   result.terminated |= life_lost;

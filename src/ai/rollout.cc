@@ -3,6 +3,7 @@
 #include <spdlog/spdlog.h>
 
 #include <cassert>
+#include <numeric>
 
 #include "ai/environment/episode_life.h"
 #include "ai/environment/episode_observation_recorder.h"
@@ -23,7 +24,8 @@ Rollout::Rollout(
     float gae_discount, float gae_lambda, const torch::Device &device,
     size_t seed, size_t num_workers, size_t worker_batch_size,
     size_t frame_skip, ale::reward_t max_return,
-    std::optional<std::filesystem::path> video_path, bool record_observation)
+    std::optional<std::filesystem::path> video_path, bool record_observation,
+    size_t pipeline_groups)
     : gae_discount_(gae_discount),
       gae_lambda_(gae_lambda),
       rom_path_(rom_path),
@@ -59,18 +61,51 @@ Rollout::Rollout(
       stop_(),
       batch_size_(worker_batch_size),
       grayscale_(grayscale),
-      record_observation_(record_observation) {
+      record_observation_(record_observation),
+      num_groups_(pipeline_groups),
+      group_size_(pipeline_groups == 0 ? 0
+                                       : total_environments / pipeline_groups) {
   if (total_environments_ == 0) {
     throw std::invalid_argument("Total environments must be greater than 0.");
   }
   if (horizon_ == 0) {
     throw std::invalid_argument("Horizon must be greater than 0.");
   }
+  if (num_groups_ == 0) {
+    throw std::invalid_argument("Pipeline groups must be greater than 0.");
+  }
+  if (total_environments_ % num_groups_ != 0) {
+    throw std::invalid_argument(
+        "Pipeline groups must divide total environments.");
+  }
+  if (batch_size_ == 0) {
+    throw std::invalid_argument("Worker batch size must be greater than 0.");
+  }
+  // Workers pop fixed batches of batch_size_ from the action queue; a
+  // remainder sub-batch never satisfies any worker's pop predicate, so
+  // rollout() would deadlock waiting for the missing results.
+  if (total_environments_ % batch_size_ != 0) {
+    throw std::invalid_argument("Total environments (" +
+                                std::to_string(total_environments_) +
+                                ") must be divisible by worker batch size (" +
+                                std::to_string(batch_size_) + ").");
+  }
+  // A group is dispatched as one batch of work units; a remainder smaller
+  // than worker_batch_size would leave Queue::pop(batch) starved forever.
+  if (group_size_ % worker_batch_size != 0) {
+    throw std::invalid_argument(
+        "Worker batch size must divide the pipeline group size.");
+  }
   if (max_steps_ == 0) {
     throw std::invalid_argument("Max steps must be greater than 0.");
   }
   if (frame_stack_ == 0) {
     throw std::invalid_argument("Frame stack must be greater than 0.");
+  }
+  // With zero workers nothing services action_queue_, so the first rollout()
+  // would block forever.
+  if (num_workers == 0) {
+    throw std::invalid_argument("Number of workers must be greater than 0.");
   }
   if (rom_path_.empty()) {
     throw std::invalid_argument("ROM path must not be empty.");
@@ -118,6 +153,8 @@ Rollout::Rollout(
   }
   for (auto &thread : threads) thread.join();
 
+  minimal_action_set_ = environments_[0]->get_interface().getMinimalActionSet();
+
   auto total = static_cast<int64_t>(total_environments_);
   auto frame = static_cast<int64_t>(frame_stack_);
   auto options = torch::TensorOptions(torch::kFloat32).device(device_);
@@ -136,6 +173,17 @@ Rollout::Rollout(
   terminated_host_.resize(total_environments_, 0);
   truncated_host_.resize(total_environments_, 0);
   is_episode_start_cpu_.resize(total_environments_, 1);
+
+  // Workers index this by absolute env id each step; preallocating lets each
+  // group stage its slice with one D2H copy while other groups keep stepping.
+  actions_cpu_ = torch::empty({static_cast<int64_t>(total_environments_)},
+                              torch::TensorOptions(torch::kLong));
+  group_results_.resize(num_groups_);
+  for (size_t g = 0; g < num_groups_; ++g) {
+    step_queues_.emplace_back(std::make_unique<ai::queue::Queue<StepResult>>());
+    auto &indices = group_indices_.emplace_back(group_size_);
+    std::iota(indices.begin(), indices.end(), g * group_size_);
+  }
 
   spdlog::info("Creating {} worker threads.", num_workers);
   for (size_t i = 0; i < num_workers; ++i) {
@@ -158,24 +206,27 @@ Rollout::create_environment(
         std::make_unique<ai::environment::TruncateOnEpisodeReturnEnvironment>(
             std::move(environment), max_return);
 
-  environment = std::make_unique<ai::environment::ResizeEnvironment>(
-      std::move(environment), height_, width_);
+  // The full-screen recorder grabs RGB straight off the interface, so it stays
+  // below MaxAndSkip to capture every emulator frame (60fps video).
+  if (i == 0 && video_path.has_value() && !record_observation_)
+    environment = std::make_unique<ai::environment::EpisodeRecorder>(
+        std::move(environment), video_path.value(), false);
 
-  if (i == 0 && video_path.has_value()) {
-    if (record_observation_)
-      environment =
-          std::make_unique<ai::environment::EpisodeObservationRecorder>(
-              std::move(environment), video_path.value(), grayscale_ ? 1 : 3,
-              height_, width_);
-    else
-      environment = std::make_unique<ai::environment::EpisodeRecorder>(
-          std::move(environment), video_path.value(), false);
-  }
   // TODO: Make this configurable.
   environment = std::make_unique<ai::environment::NoopResetEnvironment>(
       std::move(environment), 30, seed + i);
   environment = std::make_unique<ai::environment::MaxAndSkipEnvironment>(
       std::move(environment), frame_skip);
+  // Resize sits above MaxAndSkip so flicker pooling happens at native
+  // resolution and only the one emitted frame per skip window pays the resize.
+  environment = std::make_unique<ai::environment::ResizeEnvironment>(
+      std::move(environment), width_, height_);
+  // Above Resize so it records exactly what the agent sees (pooled + resized).
+  // One observation per skip window, so real-time playback is 60/frame_skip.
+  if (i == 0 && video_path.has_value() && record_observation_)
+    environment = std::make_unique<ai::environment::EpisodeObservationRecorder>(
+        std::move(environment), video_path.value(), grayscale_ ? 1 : 3, height_,
+        width_, 60 / frame_skip);
   environment =
       std::make_unique<ai::environment::EpisodeLife>(std::move(environment));
   environment =
@@ -185,135 +236,164 @@ Rollout::create_environment(
 
 Rollout::~Rollout() {
   stop_ = true;
-  std::vector<size_t> inputs(total_environments_);
-  action_result_.actions.fill_(ale::Action::RANDOM);
+  // All-true episode starts route every env down the reset path, so workers
+  // never read the staged actions while draining this wake-up batch.
   is_episode_start_cpu_.assign(total_environments_, true);
-  for (size_t i = 0; i < total_environments_; ++i) inputs[i] = i;
+  std::vector<size_t> inputs(total_environments_);
+  std::iota(inputs.begin(), inputs.end(), size_t{0});
   action_queue_.push(inputs);
   for (auto &worker : workers_)
     if (worker.joinable()) worker.join();
 }
 
 void Rollout::update_observations() {
+  update_observations(0, total_environments_);
+}
+
+void Rollout::update_observations(size_t env_start, size_t env_count) {
+  const auto start = static_cast<int64_t>(env_start);
+  const auto count = static_cast<int64_t>(env_count);
+  auto observations = observations_.narrow(0, start, count);
   // Shift the stack back by one; the oldest frame drops off.
   for (int64_t frame_index = frame_stack_ - 1; frame_index > 0; --frame_index)
-    observations_.index_put_(
+    observations.index_put_(
         {torch::indexing::Slice(), frame_index},
-        observations_.index({torch::indexing::Slice(), frame_index - 1}));
+        observations.index({torch::indexing::Slice(), frame_index - 1}));
   // On a fresh episode, prime every stacked frame with the first observation so
   // the stack isn't polluted by the previous episode's tail.
-  for (size_t i = 0; i < total_environments_; ++i)
+  for (size_t i = env_start; i < env_start + env_count; ++i)
     if (is_episode_start_cpu_[i])
       observations_.select(0, i).copy_(staging_.select(0, i),
                                        /*non_blocking=*/true);
-  // Newest frame for every env in a single page-locked H2D upload.
-  observations_.select(1, 0).copy_(staging_, /*non_blocking=*/true);
+  // Newest frame for these envs in a single page-locked H2D upload.
+  observations.select(1, 0).copy_(staging_.narrow(0, start, count),
+                                  /*non_blocking=*/true);
 }
 
-void Rollout::upload_step_state() {
+void Rollout::upload_step_state(size_t env_start, size_t env_count) {
   // Wrap the persistent host mirrors (no copy) and push each to its accelerator
   // tensor in one go. copy_ handles the dtype cast (byte mirror -> bool
   // tensor).
-  const int64_t n = static_cast<int64_t>(total_environments_);
+  const auto start = static_cast<int64_t>(env_start);
+  const auto n = static_cast<int64_t>(env_count);
   const auto byte = torch::TensorOptions(torch::kByte);
-  rewards_.copy_(torch::from_blob(rewards_host_.data(), {n}, torch::kFloat32));
-  is_terminated_.copy_(torch::from_blob(terminated_host_.data(), {n}, byte));
-  is_truncated_.copy_(torch::from_blob(truncated_host_.data(), {n}, byte));
-  is_episode_start_.copy_(
-      torch::from_blob(is_episode_start_cpu_.data(), {n}, byte));
+  rewards_.narrow(0, start, n)
+      .copy_(torch::from_blob(rewards_host_.data() + env_start, {n},
+                              torch::kFloat32));
+  is_terminated_.narrow(0, start, n)
+      .copy_(torch::from_blob(terminated_host_.data() + env_start, {n}, byte));
+  is_truncated_.narrow(0, start, n)
+      .copy_(torch::from_blob(truncated_host_.data() + env_start, {n}, byte));
+  is_episode_start_.narrow(0, start, n)
+      .copy_(torch::from_blob(is_episode_start_cpu_.data() + env_start, {n},
+                              byte));
+}
+
+void Rollout::pump_group(size_t group) {
+  const auto start = static_cast<int64_t>(group * group_size_);
+  const auto count = static_cast<int64_t>(group_size_);
+  // Action selection for this group only. Pull the actions to the host once
+  // (one sync) so workers index them without a per-env device->host copy.
+  group_results_[group] =
+      action_selector_(observations_.narrow(0, start, count));
+  actions_cpu_.narrow(0, start, count).copy_(group_results_[group].actions);
+  // Hand the group to the workers; they step while the main thread services
+  // the other groups (post-processing and inference) -- the pipeline overlap.
+  action_queue_.push(group_indices_[group]);
+}
+
+void Rollout::post_group(size_t group, size_t time_index, Log &log) {
+  const size_t env_start = group * group_size_;
+  const auto start = static_cast<int64_t>(env_start);
+  const auto count = static_cast<int64_t>(group_size_);
+  const auto step_results = step_queues_[group]->pop(group_size_);
+
+  size_t total_steps_increment = 0;
+  for (const auto &result : step_results) {
+    int64_t ale_index = result.environment_index;
+    if (!is_episode_start_cpu_[ale_index]) {
+      // Host mirror of the accelerator tensors (uploaded in bulk below):
+      rewards_host_[ale_index] = result.reward;
+      terminated_host_[ale_index] = result.terminated;
+      truncated_host_[ale_index] = result.truncated;
+      // On the CPU:
+      game_overs_[ale_index] = result.game_over;
+      episode_returns_[ale_index] += result.reward;
+      episode_lengths_[ale_index]++;
+      game_returns_[ale_index] += result.reward;
+      game_lengths_[ale_index]++;
+      total_steps_increment++;
+    }
+  }
+
+  // Upload this step's per-env state in bulk copies instead of O(envs)
+  // synchronising scalar writes.
+  upload_step_state(env_start, group_size_);
+
+  // Add the observations, and the actions that from those observations led
+  // to the rewards and terminal state changes.
+  buffer_.add_rows(
+      start, count, static_cast<int64_t>(time_index),
+      observations_.narrow(0, start, count), group_results_[group].actions,
+      rewards_.narrow(0, start, count), is_terminated_.narrow(0, start, count),
+      is_truncated_.narrow(0, start, count),
+      is_episode_start_.narrow(0, start, count), group_results_[group].logits,
+      group_results_[group].values);
+
+  // Get the next observations after taking actions and saving the
+  // observations.
+  update_observations(env_start, group_size_);
+
+  for (const auto &result : step_results) {
+    int64_t ale_index = result.environment_index;
+    if (result.terminated || result.truncated) {
+      // Accelerator state, via host mirrors (uploaded next step):
+      is_episode_start_cpu_[ale_index] = 1;
+      terminated_host_[ale_index] = 0;
+      truncated_host_[ale_index] = 0;
+      // On the CPU:
+      current_episode_++;
+      log.episode_returns.push_back(episode_returns_[ale_index]);
+      log.episode_lengths.push_back(episode_lengths_[ale_index]);
+      episode_returns_[ale_index] = 0.0;
+      episode_lengths_[ale_index] = 0;
+      if (game_overs_[ale_index]) {
+        log.game_returns.push_back(game_returns_[ale_index]);
+        log.game_lengths.push_back(game_lengths_[ale_index]);
+        game_returns_[ale_index] = 0.0;
+        game_lengths_[ale_index] = 0;
+      }
+    } else if (is_episode_start_cpu_[ale_index]) {
+      // Accelerator state, via host mirror (uploaded next step):
+      is_episode_start_cpu_[ale_index] = 0;
+    }
+  }
+  total_steps_ += total_steps_increment;
 }
 
 RolloutResult Rollout::rollout() {
-  std::vector<float> episode_returns;
-  std::vector<size_t> episode_lengths;
-  std::vector<float> game_returns;
-  std::vector<size_t> game_lengths;
+  Log log{};
 
+  // Software pipeline over env groups in a fixed round-robin (fixed order
+  // keeps RNG consumption deterministic): every group is dispatched before
+  // any is drained, so workers always have another group's steps queued
+  // while the main thread runs this group's post-processing and forward.
+  // With one group this degenerates to the classic forward->step->record
+  // loop, op for op.
+  for (size_t group = 0; group < num_groups_; ++group) pump_group(group);
   for (size_t time_index = 0; time_index < horizon_; time_index++) {
-    // Action Selection. Pull the actions to the host once (one sync) so workers
-    // index them without a per-env device->host copy.
-    action_result_ = action_selector_(observations_);
-    actions_cpu_ = action_result_.actions.to(torch::kCPU);
-
-    // Step all environments with the selected actions.
-    size_t total_steps_increment = 0;
-    const auto step_results = step_all();
-    for (const auto &result : step_results) {
-      int64_t ale_index = result.environment_index;
-      if (!is_episode_start_cpu_[ale_index]) {
-        // Host mirror of the accelerator tensors (uploaded in bulk below):
-        rewards_host_[ale_index] = result.reward;
-        terminated_host_[ale_index] = result.terminated;
-        truncated_host_[ale_index] = result.truncated;
-        // On the CPU:
-        game_overs_[ale_index] = result.game_over;
-        episode_returns_[ale_index] += result.reward;
-        episode_lengths_[ale_index]++;
-        game_returns_[ale_index] += result.reward;
-        game_lengths_[ale_index]++;
-        total_steps_increment++;
-      }
+    for (size_t group = 0; group < num_groups_; ++group) {
+      post_group(group, time_index, log);
+      if (time_index + 1 < horizon_) pump_group(group);
     }
-
-    // Upload this step's per-env state in four bulk copies instead of O(envs)
-    // synchronising scalar writes.
-    upload_step_state();
-
-    // Add the observations, and the actions that from those observations led
-    // to the rewards and terminal state changes.
-    buffer_.add(observations_, action_result_.actions, rewards_, is_terminated_,
-                is_truncated_, is_episode_start_, action_result_.logits,
-                action_result_.values);
-
-    // Get the next observations after taking actions and saving the
-    // observations.
-    update_observations();
-
-    for (const auto &result : step_results) {
-      int64_t ale_index = result.environment_index;
-      if (result.terminated || result.truncated) {
-        // Accelerator state, via host mirrors (uploaded next step):
-        is_episode_start_cpu_[ale_index] = 1;
-        terminated_host_[ale_index] = 0;
-        truncated_host_[ale_index] = 0;
-        // On the CPU:
-        current_episode_++;
-        episode_returns.push_back(episode_returns_[ale_index]);
-        episode_lengths.push_back(episode_lengths_[ale_index]);
-        episode_returns_[ale_index] = 0.0;
-        episode_lengths_[ale_index] = 0;
-        if (game_overs_[ale_index]) {
-          game_returns.push_back(game_returns_[ale_index]);
-          game_lengths.push_back(game_lengths_[ale_index]);
-          game_returns_[ale_index] = 0.0;
-          game_lengths_[ale_index] = 0;
-        }
-      } else if (is_episode_start_cpu_[ale_index]) {
-        // Accelerator state, via host mirror (uploaded next step):
-        is_episode_start_cpu_[ale_index] = 0;
-      }
-    }
-    total_steps_ += total_steps_increment;
   }
-  action_result_ = action_selector_(observations_);
+  // Bootstrap values for GAE from the observations after the final step.
+  const auto action_result = action_selector_(observations_);
   const auto batch =
-      buffer_.get(action_result_.values, gae_discount_, gae_lambda_);
-  const Log log{.steps = total_steps_,
-                .episodes = current_episode_,
-                .episode_returns = episode_returns,
-                .episode_lengths = episode_lengths,
-                .game_returns = game_returns,
-                .game_lengths = game_lengths};
+      buffer_.get(action_result.values, gae_discount_, gae_lambda_);
+  log.steps = total_steps_;
+  log.episodes = current_episode_;
   return {batch, log};
-}
-
-std::vector<StepResult> Rollout::step_all() {
-  std::vector<size_t> inputs(total_environments_);
-  for (size_t i = 0; i < total_environments_; ++i) {
-    inputs[i] = i;
-  }
-  action_queue_.push(inputs);
-  return step_queue_.pop(inputs.size());
 }
 
 void Rollout::worker() {
@@ -321,7 +401,7 @@ void Rollout::worker() {
     auto inputs = action_queue_.pop(batch_size_);
     for (const auto &input : inputs) {
       StepResult result = step(input);
-      step_queue_.push(result);
+      step_queues_[input / group_size_]->push(result);
     }
   }
 }
@@ -337,15 +417,14 @@ StepResult Rollout::step(const size_t environment_index) {
     output.truncated = false;
     output.game_over = false;
   } else {
-    auto &interface = environments_[environment_index]->get_interface();
-    auto action_set = interface.getMinimalActionSet();
-    size_t action_index = actions_cpu_[environment_index].item<int64_t>();
-    if (action_index < 0 || action_index >= action_set.size())
+    const size_t action_index =
+        actions_cpu_.const_data_ptr<int64_t>()[environment_index];
+    if (action_index >= minimal_action_set_.size())
       throw std::out_of_range("Action index out of range for environment " +
                               std::to_string(environment_index));
-    auto action = action_set[action_index];
+    auto action = minimal_action_set_[action_index];
     auto result = environments_[environment_index]->step(action);
-    observation = result.observation;
+    observation = std::move(result.observation);
     output.reward = result.reward;
     output.terminated = result.terminated;
     output.truncated = result.truncated;

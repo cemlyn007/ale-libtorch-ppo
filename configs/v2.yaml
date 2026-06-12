@@ -7,7 +7,7 @@ learning_rate: 0.00025
 clip_param: 0.2
 value_loss_coef: 0.4
 entropy_coef: 0.01
-num_epochs: 1
+num_epochs: 2
 mini_batch_size: 1280
 num_mini_batches: 16
 shuffle_mini_batches: true
@@ -17,13 +17,13 @@ max_gradient_norm: 0.5
 num_rollouts: 1000000
 num_workers: 32
 worker_batch_size: 8
-pipeline_groups: 1
+pipeline_groups: 2
 frame_skip: 4
 # Breakout max possible score.
 max_return: 864
 record_observation: false
 record_video: true
 cuda_graph: false
-deterministic: true
+deterministic: false
 # Save latest.pt every N rollouts and best.pt on return improvement; 0 disables.
 checkpoint_interval: 1000

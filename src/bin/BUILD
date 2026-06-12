@@ -14,8 +14,8 @@ cc_binary(
     ],
     deps = [
         "//src:ai",
-        "//src:checkpoint",
         "//src:stop_signal",
+        "//src/ai:checkpoint",
         "@arcade_learning_environment//:ale",
         "@cli11//:cli11",
         "@libtorch//:torch",

@@ -9,8 +9,7 @@ Buffer::Buffer(size_t total_environments, size_t capacity,
                const torch::Device &device)
     : device_(device),
       total_environments_(total_environments),
-      capacity_(capacity),
-      indices_(0) {
+      capacity_(capacity) {
   observation_shape_ =
       std::vector<int64_t>(observation_shape.begin(), observation_shape.end());
   std::vector<int64_t> buffer_observation_shape = {
@@ -42,31 +41,31 @@ Buffer::Buffer(size_t total_environments, size_t capacity,
   returns_ = torch::zeros_like(advantages_);
 }
 
-void Buffer::add(const torch::Tensor &observations,
-                 const torch::Tensor &actions, const torch::Tensor &rewards,
-                 const torch::Tensor &terminals,
-                 const torch::Tensor &truncations,
-                 const torch::Tensor &episode_starts,
-                 const torch::Tensor &logits, const torch::Tensor &values) {
-  observations_.select(1, indices_).copy_(observations);
-  actions_.select(1, indices_).copy_(actions);
-  rewards_.select(1, indices_).copy_(rewards);
-  terminals_.select(1, indices_).copy_(terminals);
-  truncations_.select(1, indices_).copy_(truncations);
-  episode_starts_.select(1, indices_).copy_(episode_starts);
-  logits_.select(1, indices_).copy_(logits);
-  values_.select(1, indices_).copy_(values);
-  indices_ = (indices_ + 1) % capacity_;
+void Buffer::add_rows(
+    int64_t env_start, int64_t env_count, int64_t time_index,
+    const torch::Tensor &observations, const torch::Tensor &actions,
+    const torch::Tensor &rewards, const torch::Tensor &terminals,
+    const torch::Tensor &truncations, const torch::Tensor &episode_starts,
+    const torch::Tensor &logits, const torch::Tensor &values) {
+  auto rows = [&](torch::Tensor &t) {
+    return t.narrow(0, env_start, env_count).select(1, time_index);
+  };
+  rows(observations_).copy_(observations);
+  rows(actions_).copy_(actions);
+  rows(rewards_).copy_(rewards);
+  rows(terminals_).copy_(terminals);
+  rows(truncations_).copy_(truncations);
+  rows(episode_starts_).copy_(episode_starts);
+  rows(logits_).copy_(logits);
+  rows(values_).copy_(values);
+  filled_rows_ += env_count;
 }
 
 Batch Buffer::get(const torch::Tensor &next_values, float discount,
                   float lambda) {
-  // This function is a placeholder for the actual implementation.
-  // It should return a reference to a Batch object containing the data
-  // from the buffer, possibly using the final value function estimates
-  // for the last observations.
-  if (indices_ != 0)
+  if (filled_rows_ != static_cast<int64_t>(total_environments_ * capacity_))
     throw std::runtime_error("Buffer is not full, cannot compute GAE.");
+  filled_rows_ = 0;
 
   rewards_.clamp_(-1.0f, 1.0f);
   ai::gae::gae(advantages_, rewards_, values_, next_values, terminals_,

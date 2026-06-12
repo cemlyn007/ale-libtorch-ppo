@@ -3,6 +3,7 @@
 #include <atomic>
 #include <filesystem>
 #include <functional>
+#include <memory>
 
 #include "ai/buffer.h"
 #include "ai/environment/environment.h"
@@ -47,7 +48,7 @@ class Rollout {
           size_t seed, size_t num_workers, size_t worker_batch_size,
           size_t frame_skip, ale::reward_t max_return = 0.0f,
           std::optional<std::filesystem::path> video_path = std::nullopt,
-          bool record_observation = false);
+          bool record_observation = false, size_t pipeline_groups = 1);
   ~Rollout();
   RolloutResult rollout();
   void update_observations();
@@ -60,8 +61,14 @@ class Rollout {
       size_t i, size_t seed, size_t frame_skip, ale::reward_t max_return,
       const std::optional<std::filesystem::path> &video_path) const;
   StepResult step(const size_t environment_index);
-  std::vector<StepResult> step_all();
-  void upload_step_state();
+  // Pipelined rollout stages, operating on one contiguous env group each.
+  // pump: policy forward + stage actions on the host + dispatch to workers.
+  // post: drain the group's results, account into log, upload, record,
+  // advance obs.
+  void pump_group(size_t group);
+  void post_group(size_t group, size_t time_index, Log &log);
+  void upload_step_state(size_t env_start, size_t env_count);
+  void update_observations(size_t env_start, size_t env_count);
   void worker();
 
   std::filesystem::path rom_path_;
@@ -107,17 +114,31 @@ class Rollout {
 
   std::vector<std::unique_ptr<ai::environment::VirtualEnvironment>>
       environments_;
+  // Same ROM in every env, so one copy serves all workers (read-only after
+  // construction). getMinimalActionSet() builds a fresh vector per call, so
+  // it must not be called per step.
+  std::vector<ale::Action> minimal_action_set_;
 
   std::atomic<bool> stop_;
 
   std::vector<std::thread> workers_;
   ai::queue::Queue<size_t> action_queue_;
-  ai::queue::Queue<StepResult> step_queue_;
+  // One result queue per pipeline group so draining a group is a single
+  // blocking pop and never mixes with another group's in-flight results.
+  // (Queue holds a mutex, so the queues are heap-allocated to stay put.)
+  std::vector<std::unique_ptr<ai::queue::Queue<StepResult>>> step_queues_;
   size_t batch_size_;
   bool grayscale_;
   bool record_observation_;
 
-  ActionResult action_result_;
+  // Pipelined inference: envs split into num_groups_ contiguous groups of
+  // group_size_; while one group steps in the workers, the main thread
+  // post-processes and re-dispatches the others. 1 group == the classic
+  // fully-synchronous loop.
+  size_t num_groups_;
+  size_t group_size_;
+  std::vector<std::vector<size_t>> group_indices_;  // constant dispatch lists
+  std::vector<ActionResult> group_results_;         // in-flight per group
 };
 
 }  // namespace ai::rollout

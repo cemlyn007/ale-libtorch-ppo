@@ -10,15 +10,15 @@
 #include <ale/common/Log.hpp>
 #include <ale/version.hpp>
 #include <cstdlib>
-#include <limits>
 #include <memory>
 #include <numeric>
+#include <optional>
 #include <type_traits>
 
+#include "ai/checkpoint.h"
 #include "ai/ppo/losses.h"
 #include "ai/rollout.h"
 #include "ai/vision.h"
-#include "checkpoint.h"
 #include "stop_signal.h"
 #include "tensorboard_logger.h"
 
@@ -35,12 +35,17 @@ struct Config {
   long num_epochs;
   long mini_batch_size;
   long num_mini_batches;
+  bool shuffle_mini_batches;
   float gae_discount;
   float gae_lambda;
   float max_gradient_norm;
   size_t num_rollouts;
   size_t num_workers;
   size_t worker_batch_size;
+  // Contiguous env groups stepped as a software pipeline: while one group is
+  // in the workers, inference and bookkeeping run for the others. 1 = the
+  // classic fully-synchronous loop.
+  size_t pipeline_groups;
   size_t frame_skip;
   // Some games like breakout have a maximum return
   // which should be used to reset the environment.
@@ -74,12 +79,14 @@ void for_each_field(Self &config, Visitor &&visit) {
   visit("num_epochs", config.num_epochs);
   visit("mini_batch_size", config.mini_batch_size);
   visit("num_mini_batches", config.num_mini_batches);
+  visit("shuffle_mini_batches", config.shuffle_mini_batches);
   visit("gae_discount", config.gae_discount);
   visit("gae_lambda", config.gae_lambda);
   visit("max_gradient_norm", config.max_gradient_norm);
   visit("num_rollouts", config.num_rollouts);
   visit("num_workers", config.num_workers);
   visit("worker_batch_size", config.worker_batch_size);
+  visit("pipeline_groups", config.pipeline_groups);
   visit("frame_skip", config.frame_skip);
   visit("max_return", config.max_return);
   visit("record_observation", config.record_observation);
@@ -264,7 +271,7 @@ ai::ppo::train::Batch prepare_batch(ai::buffer::Batch &batch) {
 ai::ppo::train::Hyperparameters prepare_hyperparameters(const Config &config) {
   ai::ppo::train::Hyperparameters hp = {
       config.clip_param, config.value_loss_coef, config.entropy_coef,
-      config.max_gradient_norm};
+      config.max_gradient_norm, config.shuffle_mini_batches};
   return hp;
 }
 
@@ -563,7 +570,7 @@ int main(int argc, char **argv) {
       },
       config.gae_discount, config.gae_lambda, device, 0, config.num_workers,
       config.worker_batch_size, config.frame_skip, config.max_return,
-      video_path, config.record_observation);
+      video_path, config.record_observation, config.pipeline_groups);
   torch::Tensor indices =
       torch::empty(config.mini_batch_size * config.num_mini_batches,
                    torch::TensorOptions().dtype(torch::kLong).device(device));
@@ -595,9 +602,11 @@ int main(int argc, char **argv) {
         profiler_config, activities,
         {torch::RecordScope::FUNCTION, torch::RecordScope::USER_SCOPE});
   }
-  // Mean episode return of the best rollout so far; best.pt is rewritten
-  // whenever a rollout beats it.
-  double best_return = -std::numeric_limits<double>::infinity();
+  ai::checkpoint::Checkpointer checkpointer(
+      run_dir, config.checkpoint_interval,
+      [&logger](size_t step, const std::string &text) {
+        logger.add_text("checkpoint", step, text.c_str());
+      });
   for (size_t rollout_index = 0; rollout_index < config.num_rollouts;
        ++rollout_index) {
     if (stop.requested()) {
@@ -617,31 +626,12 @@ int main(int argc, char **argv) {
 
     log_data(logger, result.log, metrics, trainer->learning_rate());
 
-    if (config.checkpoint_interval > 0) {
-      // next_rollout_index is rollout_index + 1 and global_step is the env-step
-      // count so far: both are written so a checkpoint is resume-ready, even
-      // though loading them back to resume a run is a later change.
-      const size_t step = result.log.steps;
-      if (!result.log.episode_returns.empty()) {
-        const double rollout_return = mean(result.log.episode_returns);
-        if (rollout_return > best_return) {
-          best_return = rollout_return;
-          checkpoint::save(run_dir / "best.pt", *network, optimizer,
-                           {rollout_index + 1, best_return, step});
-          logger.add_text("checkpoint", step,
-                          ("best.pt return=" + std::to_string(best_return) +
-                           " rollout=" + std::to_string(rollout_index + 1))
-                              .c_str());
-        }
-      }
-      if ((rollout_index + 1) % config.checkpoint_interval == 0) {
-        checkpoint::save(run_dir / "latest.pt", *network, optimizer,
-                         {rollout_index + 1, best_return, step});
-        logger.add_text(
-            "checkpoint", step,
-            ("latest.pt rollout=" + std::to_string(rollout_index + 1)).c_str());
-      }
-    }
+    checkpointer.on_rollout_end(
+        rollout_index, result.log.steps,
+        result.log.episode_returns.empty()
+            ? std::nullopt
+            : std::optional<double>(mean(result.log.episode_returns)),
+        *network, optimizer);
   }
   if (!profile_path.empty()) {
     auto profiler_result = torch::autograd::profiler::disableProfiler();

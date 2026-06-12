@@ -11,11 +11,12 @@ ScreenBuffer TruncateOnEpisodeReturnEnvironment::reset() {
   return env_->reset();
 }
 
-Step TruncateOnEpisodeReturnEnvironment::step(const ale::Action &action) {
+Step TruncateOnEpisodeReturnEnvironment::step(const ale::Action &action,
+                                              bool want_observation) {
   if (current_return_ >= max_return_)
     throw std::runtime_error(
         "Cannot step, current return has reached or exceeded max return.");
-  Step step = env_->step(action);
+  Step step = env_->step(action, want_observation);
   current_return_ += step.reward;
   if (!step.terminated && current_return_ >= max_return_) {
     step.truncated = true;

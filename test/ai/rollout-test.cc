@@ -22,10 +22,12 @@ class RolloutTest : public ::testing::Test {
   }
 
   // Small CPU rollout whose selector always picks action 0; logits are sized
-  // from the ROM's minimal action set so Buffer::add accepts them.
+  // from the ROM's minimal action set so the buffer accepts them. The selector
+  // is deterministic, so trajectories must not depend on pipeline grouping.
   ai::rollout::Rollout construct_rollout(size_t total_environments,
                                          size_t num_workers,
-                                         size_t worker_batch_size) {
+                                         size_t worker_batch_size,
+                                         size_t pipeline_groups = 1) {
     ale::ALEInterface ale;
     ale.loadROM(rom_path_);
     const auto action_size =
@@ -41,7 +43,9 @@ class RolloutTest : public ::testing::Test {
         },
         /*gae_discount=*/0.99f, /*gae_lambda=*/0.95f,
         torch::Device(torch::kCPU), /*seed=*/42, num_workers, worker_batch_size,
-        /*frame_skip=*/4);
+        /*frame_skip=*/4, /*max_return=*/0.0f,
+        /*video_path=*/std::nullopt, /*record_observation=*/false,
+        pipeline_groups);
   }
 
   static constexpr size_t kTotalEnvironments = 2;
@@ -51,7 +55,7 @@ class RolloutTest : public ::testing::Test {
 };
 
 // A worker batch size that does not divide the environment count would leave a
-// final sub-batch no worker can ever pop, deadlocking step_all(); the
+// final sub-batch no worker can ever pop, deadlocking rollout(); the
 // constructor must reject it up front.
 TEST_F(RolloutTest, ThrowsWhenWorkerBatchSizeDoesNotDivideTotalEnvironments) {
   EXPECT_THROW(construct_rollout(/*total_environments=*/4, /*num_workers=*/1,
@@ -66,7 +70,7 @@ TEST_F(RolloutTest, ThrowsWhenWorkerBatchSizeIsZero) {
 }
 
 // With zero workers nothing ever services the action queue, so the first
-// step_all() would block forever; the constructor must reject it instead.
+// rollout() would block forever; the constructor must reject it instead.
 TEST_F(RolloutTest, ZeroWorkersThrows) {
   EXPECT_THROW(construct_rollout(kTotalEnvironments, /*num_workers=*/0,
                                  /*worker_batch_size=*/1),
@@ -74,9 +78,8 @@ TEST_F(RolloutTest, ZeroWorkersThrows) {
 }
 
 // A fully-constructed Rollout destroyed before rollout() ever runs must shut
-// down cleanly: action_result_ is only assigned inside rollout(), and fill_
-// on the undefined tensor would throw inside the noexcept destructor and
-// terminate the process.
+// down cleanly: workers blocked on the action queue have to be woken onto the
+// reset path and joined without ever reading the (unstaged) actions.
 TEST_F(RolloutTest, DestroyBeforeFirstRollout) {
   {
     auto rollout = construct_rollout(kTotalEnvironments, /*num_workers=*/1,
@@ -85,8 +88,8 @@ TEST_F(RolloutTest, DestroyBeforeFirstRollout) {
   SUCCEED();
 }
 
-// Destruction after a completed rollout exercises the defined-tensor branch
-// of the destructor as well as the normal worker shutdown.
+// Destruction after a completed rollout exercises worker shutdown with envs
+// mid-episode rather than at their initial reset.
 TEST_F(RolloutTest, RolloutThenDestroy) {
   auto rollout = construct_rollout(kTotalEnvironments, /*num_workers=*/1,
                                    /*worker_batch_size=*/1);
@@ -106,4 +109,54 @@ TEST_F(RolloutTest, DivisibleWorkerBatchSizeRollsOut) {
   const auto result = rollout.rollout();
   EXPECT_EQ(result.log.steps, (kHorizon - 1) * kTotalEnvironments);
   EXPECT_EQ(result.log.episodes, 0u);
+}
+
+// The constructor must reject group configurations that would starve
+// Queue::pop and hang: zero groups, groups that do not divide the env count,
+// and a worker batch that does not divide the group size.
+TEST_F(RolloutTest, InvalidPipelineGroupingThrows) {
+  EXPECT_THROW(construct_rollout(kTotalEnvironments, /*num_workers=*/1,
+                                 /*worker_batch_size=*/1,
+                                 /*pipeline_groups=*/0),
+               std::invalid_argument);
+  EXPECT_THROW(construct_rollout(kTotalEnvironments, /*num_workers=*/1,
+                                 /*worker_batch_size=*/1,
+                                 /*pipeline_groups=*/3),
+               std::invalid_argument);
+  EXPECT_THROW(construct_rollout(kTotalEnvironments, /*num_workers=*/1,
+                                 /*worker_batch_size=*/2,
+                                 /*pipeline_groups=*/2),
+               std::invalid_argument);
+}
+
+// With a deterministic selector, grouping must not change trajectories: the
+// pipelined loop (two groups) and the classic synchronous loop (one group)
+// must produce bit-identical batches and logs, rollout after rollout. One
+// worker keeps result-queue order deterministic so the logs compare exactly.
+TEST_F(RolloutTest, PipelinedMatchesSynchronous) {
+  auto synchronous = construct_rollout(kTotalEnvironments, /*num_workers=*/1,
+                                       /*worker_batch_size=*/1);
+  auto pipelined = construct_rollout(kTotalEnvironments, /*num_workers=*/1,
+                                     /*worker_batch_size=*/1,
+                                     /*pipeline_groups=*/2);
+  for (int iteration = 0; iteration < 3; ++iteration) {
+    const auto expected = synchronous.rollout();
+    const auto actual = pipelined.rollout();
+    EXPECT_TRUE(
+        torch::equal(expected.batch.observations, actual.batch.observations));
+    EXPECT_TRUE(torch::equal(expected.batch.actions, actual.batch.actions));
+    EXPECT_TRUE(torch::equal(expected.batch.rewards, actual.batch.rewards));
+    EXPECT_TRUE(torch::equal(expected.batch.masks, actual.batch.masks));
+    EXPECT_TRUE(torch::equal(expected.batch.logits, actual.batch.logits));
+    EXPECT_TRUE(torch::equal(expected.batch.values, actual.batch.values));
+    EXPECT_TRUE(
+        torch::equal(expected.batch.advantages, actual.batch.advantages));
+    EXPECT_TRUE(torch::equal(expected.batch.returns, actual.batch.returns));
+    EXPECT_EQ(expected.log.steps, actual.log.steps);
+    EXPECT_EQ(expected.log.episodes, actual.log.episodes);
+    EXPECT_EQ(expected.log.episode_returns, actual.log.episode_returns);
+    EXPECT_EQ(expected.log.episode_lengths, actual.log.episode_lengths);
+    EXPECT_EQ(expected.log.game_returns, actual.log.game_returns);
+    EXPECT_EQ(expected.log.game_lengths, actual.log.game_lengths);
+  }
 }

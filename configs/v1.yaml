@@ -17,6 +17,7 @@ max_gradient_norm: 0.5
 num_rollouts: 1000000
 num_workers: 32
 worker_batch_size: 8
+pipeline_groups: 1
 frame_skip: 4
 # Breakout max possible score.
 max_return: 864

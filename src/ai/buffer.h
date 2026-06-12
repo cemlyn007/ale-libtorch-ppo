@@ -30,11 +30,15 @@ class Buffer {
          std::vector<size_t> observation_shape, size_t action_size,
          const torch::Device &device);
 
-  void add(const torch::Tensor &observations, const torch::Tensor &actions,
-           const torch::Tensor &rewards, const torch::Tensor &terminals,
-           const torch::Tensor &truncations,
-           const torch::Tensor &episode_starts, const torch::Tensor &logits,
-           const torch::Tensor &values);
+  // Row-ranged write for pipelined rollouts: envs [env_start,
+  // env_start+env_count) at an explicit time slot; groups may land in any
+  // order within a rollout.
+  void add_rows(int64_t env_start, int64_t env_count, int64_t time_index,
+                const torch::Tensor &observations, const torch::Tensor &actions,
+                const torch::Tensor &rewards, const torch::Tensor &terminals,
+                const torch::Tensor &truncations,
+                const torch::Tensor &episode_starts,
+                const torch::Tensor &logits, const torch::Tensor &values);
 
   Batch get(const torch::Tensor &next_values, float discount, float lambda);
 
@@ -43,7 +47,9 @@ class Buffer {
   size_t total_environments_;
   size_t capacity_;
   std::vector<int64_t> observation_shape_;
-  int64_t indices_;
+  // Env-rows written since the last get(); get() requires full coverage
+  // (total_environments * capacity) before it will compute GAE.
+  int64_t filled_rows_ = 0;
 
   torch::Tensor observations_;
   torch::Tensor actions_;

@@ -42,6 +42,10 @@ struct Config {
   size_t num_rollouts;
   size_t num_workers;
   size_t worker_batch_size;
+  // Contiguous env groups stepped as a software pipeline: while one group is
+  // in the workers, inference and bookkeeping run for the others. 1 = the
+  // classic fully-synchronous loop.
+  size_t pipeline_groups;
   size_t frame_skip;
   // Some games like breakout have a maximum return
   // which should be used to reset the environment.
@@ -82,6 +86,7 @@ void for_each_field(Self &config, Visitor &&visit) {
   visit("num_rollouts", config.num_rollouts);
   visit("num_workers", config.num_workers);
   visit("worker_batch_size", config.worker_batch_size);
+  visit("pipeline_groups", config.pipeline_groups);
   visit("frame_skip", config.frame_skip);
   visit("max_return", config.max_return);
   visit("record_observation", config.record_observation);
@@ -565,7 +570,7 @@ int main(int argc, char **argv) {
       },
       config.gae_discount, config.gae_lambda, device, 0, config.num_workers,
       config.worker_batch_size, config.frame_skip, config.max_return,
-      video_path, config.record_observation);
+      video_path, config.record_observation, config.pipeline_groups);
   torch::Tensor indices =
       torch::empty(config.mini_batch_size * config.num_mini_batches,
                    torch::TensorOptions().dtype(torch::kLong).device(device));

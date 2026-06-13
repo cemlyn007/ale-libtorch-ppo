@@ -7,6 +7,7 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <exception>
 #include <filesystem>
 #include <limits>
 #include <map>
@@ -145,49 +146,62 @@ int main(int argc, char **argv) {
     // under a fixed rate rather than each rung's own anneal schedule.
     config.num_rollouts = std::numeric_limits<size_t>::max();
 
-    const auto ts = std::chrono::system_clock::now().time_since_epoch().count();
-    const std::string name = "arm" + std::to_string(arm.id) + "_t" +
-                             std::to_string(static_cast<long>(budget_seconds));
-    const std::filesystem::path run_dir =
-        log_path / (name + "." + std::to_string(ts));
-    std::filesystem::create_directories(run_dir);
-    TensorBoardLogger logger(
-        (run_dir / (name + ".tfevents." + std::to_string(ts))).string());
+    // An arm whose sampled config is internally inconsistent (e.g. a batch
+    // geometry the rollout/update reject) scores -inf and is culled rather than
+    // taking the whole search down. validate() catches it up front; the try also
+    // covers anything Session construction throws.
+    try {
+      training::validate(config);
 
-    training::Session session(config, rom_path, std::nullopt, device,
-                              seed + arm.id);
-    logger.add_hparams(get_parameters(arm.config, session.action_size()), name,
-                       ts);
+      const auto ts =
+          std::chrono::system_clock::now().time_since_epoch().count();
+      const std::string name =
+          "arm" + std::to_string(arm.id) + "_t" +
+          std::to_string(static_cast<long>(budget_seconds));
+      const std::filesystem::path run_dir =
+          log_path / (name + "." + std::to_string(ts));
+      std::filesystem::create_directories(run_dir);
+      TensorBoardLogger logger(
+          (run_dir / (name + ".tfevents." + std::to_string(ts))).string());
 
-    // Wall-clock measured over training only (Session construction — env
-    // startup, graph capture — is fixed per-arm overhead, excluded here).
-    std::vector<double> curve;
-    size_t rollouts = 0;
-    const auto start = std::chrono::steady_clock::now();
-    for (auto report = session.step(); report; report = session.step()) {
-      ++rollouts;
-      logger.add_scalar("mean_loss", report->global_step,
-                        report->metrics->loss.mean().item<float>());
-      if (report->mean_episode_return) {
-        logger.add_scalar("mean_episode_return", report->global_step,
-                          *report->mean_episode_return);
-        curve.push_back(*report->mean_episode_return);
+      training::Session session(config, rom_path, std::nullopt, device,
+                                seed + arm.id);
+      logger.add_hparams(get_parameters(arm.config, session.action_size()),
+                         name, ts);
+
+      // Wall-clock measured over training only (Session construction — env
+      // startup, graph capture — is fixed per-arm overhead, excluded here).
+      std::vector<double> curve;
+      size_t rollouts = 0;
+      const auto start = std::chrono::steady_clock::now();
+      for (auto report = session.step(); report; report = session.step()) {
+        ++rollouts;
+        logger.add_scalar("mean_loss", report->global_step,
+                          report->metrics->loss.mean().item<float>());
+        if (report->mean_episode_return) {
+          logger.add_scalar("mean_episode_return", report->global_step,
+                            *report->mean_episode_return);
+          curve.push_back(*report->mean_episode_return);
+        }
+        const double elapsed = std::chrono::duration<double>(
+                                   std::chrono::steady_clock::now() - start)
+                                   .count();
+        if (elapsed >= budget_seconds || stop.requested()) break;
       }
+      const double score = smoothed_curve_max(curve, smoothing_window);
       const double elapsed = std::chrono::duration<double>(
                                  std::chrono::steady_clock::now() - start)
                                  .count();
-      if (elapsed >= budget_seconds || stop.requested()) break;
+      spdlog::info(
+          "  arm {:>3}  {:>6.1f}s ({:>4} rollouts)  lr={:.2e} clip={:.2f} "
+          "ent={:.2e} epochs={} lambda={:.3f}  -> score={:.4f}",
+          arm.id, elapsed, rollouts, config.learning_rate, config.clip_param,
+          config.entropy_coef, config.num_epochs, config.gae_lambda, score);
+      return score;
+    } catch (const std::exception &e) {
+      spdlog::warn("  arm {:>3}  rejected: {}", arm.id, e.what());
+      return -std::numeric_limits<double>::infinity();
     }
-    const double score = smoothed_curve_max(curve, smoothing_window);
-    const double elapsed =
-        std::chrono::duration<double>(std::chrono::steady_clock::now() - start)
-            .count();
-    spdlog::info(
-        "  arm {:>3}  {:>6.1f}s ({:>4} rollouts)  lr={:.2e} clip={:.2f} "
-        "ent={:.2e} epochs={} lambda={:.3f}  -> score={:.4f}",
-        arm.id, elapsed, rollouts, config.learning_rate, config.clip_param,
-        config.entropy_coef, config.num_epochs, config.gae_lambda, score);
-    return score;
   };
 
   auto bracket = training::bandit::successive_halving(std::move(arms), eta,

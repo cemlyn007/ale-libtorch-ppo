@@ -167,6 +167,9 @@ std::vector<Arm> sample_arms(const Config &base, size_t count, uint64_t seed,
     Config config = base;
     for (const ParamSpec &spec : space)
       spec.apply(config, sample_value(spec, rng));
+    // Derive the coupled fields (mini_batch_size) from whatever batch geometry
+    // this arm sampled, so every arm is internally consistent / validate()-clean.
+    reconcile(config);
     arms.push_back({i, config});
   }
   return arms;

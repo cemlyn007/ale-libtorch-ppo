@@ -82,11 +82,16 @@ class Checkpointer {
   // without this class depending on a logger.
   using Announce = std::function<void(size_t step, const std::string &)>;
 
-  Checkpointer(std::filesystem::path run_dir, size_t interval,
-               Announce announce = {})
+  // initial_best_return seeds the best.pt criterion so it survives a resume:
+  // pass the restored checkpoint's best_return, or leave it at -inf to start
+  // fresh.
+  Checkpointer(
+      std::filesystem::path run_dir, size_t interval, Announce announce = {},
+      double initial_best_return = -std::numeric_limits<double>::infinity())
       : run_dir_(std::move(run_dir)),
         interval_(interval),
-        announce_(std::move(announce)) {}
+        announce_(std::move(announce)),
+        best_return_(initial_best_return) {}
 
   // Mean episode return of the best rollout so far.
   double best_return() const { return best_return_; }
@@ -107,12 +112,33 @@ class Checkpointer {
                "best.pt return=" + std::to_string(best_return_) +
                    " rollout=" + std::to_string(next_rollout_index));
     }
-    if (next_rollout_index % interval_ == 0) {
-      save(run_dir_ / "latest.pt", network, optimizer,
-           {next_rollout_index, best_return_, global_step});
-      announce(global_step,
-               "latest.pt rollout=" + std::to_string(next_rollout_index));
-    }
+    // Remember the newest rollout so flush_latest can persist it on exit even
+    // when it did not land on an interval boundary.
+    pending_next_rollout_index_ = next_rollout_index;
+    pending_global_step_ = global_step;
+    pending_latest_ = true;
+    if (next_rollout_index % interval_ == 0)
+      flush_latest(network, optimizer, "interval");
+  }
+
+  // Write latest.pt for the most recently completed rollout when it has not
+  // already been written at an interval. A graceful stop breaks before the next
+  // interval and a clean run can finish between intervals; either way this
+  // keeps the newest weights rather than only the last interval multiple.
+  // `reason` is surfaced in the announce text. No-op when checkpointing is
+  // disabled or nothing is pending (so calling it after an interval save never
+  // duplicates).
+  void flush_latest(const torch::nn::Module &network,
+                    const torch::optim::Adam &optimizer,
+                    const std::string &reason) {
+    if (interval_ == 0 || !pending_latest_) return;
+    save(run_dir_ / "latest.pt", network, optimizer,
+         {pending_next_rollout_index_, best_return_, pending_global_step_});
+    announce(
+        pending_global_step_,
+        "latest.pt rollout=" + std::to_string(pending_next_rollout_index_) +
+            " (" + reason + ")");
+    pending_latest_ = false;
   }
 
  private:
@@ -123,7 +149,13 @@ class Checkpointer {
   std::filesystem::path run_dir_;
   size_t interval_;
   Announce announce_;
-  double best_return_ = -std::numeric_limits<double>::infinity();
+  double best_return_;
+  // The latest completed rollout, awaiting a latest.pt write. pending_latest_
+  // is cleared once written so an interval save and a later flush never
+  // collide.
+  bool pending_latest_ = false;
+  size_t pending_next_rollout_index_ = 0;
+  size_t pending_global_step_ = 0;
 };
 
 }  // namespace ai::checkpoint

@@ -203,7 +203,85 @@ TEST_F(CheckpointTest, CheckpointerDisabledWhenIntervalZero) {
       [&](size_t, const std::string &text) { announced.push_back(text); });
 
   checkpointer.on_rollout_end(0, 10, 5.0, *net, optimizer);
+  checkpointer.flush_latest(*net, optimizer, "final");
   EXPECT_FALSE(std::filesystem::exists(path("best.pt")));
   EXPECT_FALSE(std::filesystem::exists(path("latest.pt")));
   EXPECT_TRUE(announced.empty());
+}
+
+// A rollout that did not land on an interval is still flushed on exit, so a
+// graceful stop keeps its newest weights rather than only the last multiple.
+TEST_F(CheckpointTest, CheckpointerFlushLatestWritesPendingRollout) {
+  TinyNet net;
+  torch::optim::Adam optimizer(net->parameters(),
+                               torch::optim::AdamOptions(0.1));
+  std::vector<std::string> announced;
+  ai::checkpoint::Checkpointer checkpointer(
+      path(""), /*interval=*/100,
+      [&](size_t, const std::string &text) { announced.push_back(text); });
+
+  // rollout index 2 -> next_rollout_index 3, which 100 never divides.
+  checkpointer.on_rollout_end(2, 30, std::nullopt, *net, optimizer);
+  EXPECT_FALSE(std::filesystem::exists(path("latest.pt")));
+
+  checkpointer.flush_latest(*net, optimizer, "shutdown");
+  ASSERT_TRUE(std::filesystem::exists(path("latest.pt")));
+  TinyNet restored;
+  torch::optim::Adam restored_optimizer(restored->parameters(),
+                                        torch::optim::AdamOptions(0.1));
+  const ai::checkpoint::Checkpoint loaded = ai::checkpoint::load(
+      path("latest.pt"), *restored, restored_optimizer, torch::kCPU);
+  EXPECT_EQ(loaded.next_rollout_index, 3u);
+  EXPECT_EQ(loaded.global_step, 30u);
+  ASSERT_EQ(announced.size(), 1u);
+  EXPECT_NE(announced[0].find("shutdown"), std::string::npos);
+
+  // Nothing is pending after the flush, so a second call is a no-op.
+  checkpointer.flush_latest(*net, optimizer, "shutdown");
+  EXPECT_EQ(announced.size(), 1u);
+}
+
+// An interval save already persists the rollout, so a trailing flush must not
+// write it a second time.
+TEST_F(CheckpointTest, CheckpointerFlushLatestNoOpAfterIntervalSave) {
+  TinyNet net;
+  torch::optim::Adam optimizer(net->parameters(),
+                               torch::optim::AdamOptions(0.1));
+  std::vector<std::string> announced;
+  ai::checkpoint::Checkpointer checkpointer(
+      path(""), /*interval=*/1,
+      [&](size_t, const std::string &text) { announced.push_back(text); });
+
+  checkpointer.on_rollout_end(0, 10, std::nullopt, *net, optimizer);
+  ASSERT_TRUE(std::filesystem::exists(path("latest.pt")));
+  ASSERT_EQ(announced.size(), 1u);
+  EXPECT_NE(announced[0].find("interval"), std::string::npos);
+
+  checkpointer.flush_latest(*net, optimizer, "final");
+  EXPECT_EQ(announced.size(), 1u);
+}
+
+// Seeding best_return lets the best.pt criterion survive a resume: a rollout
+// below the restored best leaves best.pt untouched.
+TEST_F(CheckpointTest, CheckpointerSeedsBestReturnForResume) {
+  TinyNet net;
+  torch::optim::Adam optimizer(net->parameters(),
+                               torch::optim::AdamOptions(0.1));
+  std::vector<std::string> announced;
+  ai::checkpoint::Checkpointer checkpointer(
+      path(""), /*interval=*/100,
+      [&](size_t, const std::string &text) { announced.push_back(text); },
+      /*initial_best_return=*/5.0);
+  EXPECT_DOUBLE_EQ(checkpointer.best_return(), 5.0);
+
+  checkpointer.on_rollout_end(0, 10, 4.0, *net, optimizer);
+  EXPECT_FALSE(std::filesystem::exists(path("best.pt")));
+  EXPECT_DOUBLE_EQ(checkpointer.best_return(), 5.0);
+  EXPECT_TRUE(announced.empty());
+
+  checkpointer.on_rollout_end(1, 20, 6.0, *net, optimizer);
+  EXPECT_TRUE(std::filesystem::exists(path("best.pt")));
+  EXPECT_DOUBLE_EQ(checkpointer.best_return(), 6.0);
+  ASSERT_EQ(announced.size(), 1u);
+  EXPECT_NE(announced[0].find("best.pt"), std::string::npos);
 }

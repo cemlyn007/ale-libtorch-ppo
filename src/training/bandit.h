@@ -1,6 +1,7 @@
 #pragma once
 #include <cstddef>
 #include <cstdint>
+#include <filesystem>
 #include <functional>
 #include <string>
 #include <utility>
@@ -44,6 +45,12 @@ using SearchSpace = std::vector<ParamSpec>;
 // clip_param, entropy_coef, num_epochs, gae_lambda). All other Config fields
 // are held at their base value.
 SearchSpace default_search_space();
+
+// Loads a search space from YAML (see configs/search_space.yaml): a
+// `parameters` sequence of {field, distribution, low/high or choices}. Setters
+// are bound by field name via config::apply_field. Validates the result; throws
+// on a bad file or unknown field/distribution.
+SearchSpace load_search_space(const std::filesystem::path &path);
 
 // Rejects a malformed search space (low > high, non-positive log bounds, empty
 // or missing choices, no apply). Throws std::invalid_argument.

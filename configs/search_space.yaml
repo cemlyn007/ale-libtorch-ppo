@@ -1,0 +1,38 @@
+# Search space for the bandit hyperparameter tuner (//src/bin:meta_train).
+#
+# Each entry under `parameters` names a Config field (one of the keys in a
+# config YAML, e.g. configs/v2.yaml) and how the tuner should sample it for each
+# arm. Fields not listed here keep the value from the --base-config.
+#
+# distribution:
+#   uniform      real, uniform over [low, high]
+#   log_uniform  real, uniform in log-space over [low, high]   (low > 0)
+#   int_uniform  integer, uniform over [low, high] inclusive
+#   choice       categorical, uniform over `choices`
+#
+# Mirrors bandit::default_search_space(); pass it with
+#   meta_train --search-space configs/search_space.yaml ...
+parameters:
+  - field: learning_rate
+    distribution: log_uniform
+    low: 1.0e-4
+    high: 1.0e-3
+
+  - field: clip_param
+    distribution: choice
+    choices: [0.1, 0.2, 0.3]
+
+  - field: entropy_coef
+    distribution: log_uniform
+    low: 1.0e-3
+    high: 3.0e-2
+
+  - field: num_epochs
+    distribution: int_uniform
+    low: 1
+    high: 4
+
+  - field: gae_lambda
+    distribution: uniform
+    low: 0.90
+    high: 0.98

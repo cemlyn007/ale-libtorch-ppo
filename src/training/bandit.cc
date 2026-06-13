@@ -1,9 +1,12 @@
 #include "training/bandit.h"
 
+#include <yaml-cpp/yaml.h>
+
 #include <algorithm>
 #include <cmath>
 #include <random>
 #include <stdexcept>
+#include <unordered_map>
 
 namespace training::bandit {
 
@@ -63,6 +66,47 @@ SearchSpace default_search_space() {
        {},
        [](Config &c, double v) { c.gae_lambda = static_cast<float>(v); }},
   };
+}
+
+SearchSpace load_search_space(const std::filesystem::path &path) {
+  static const std::unordered_map<std::string, Distribution> kDistributions = {
+      {"uniform", Distribution::kUniform},
+      {"log_uniform", Distribution::kLogUniform},
+      {"int_uniform", Distribution::kIntUniform},
+      {"choice", Distribution::kChoice},
+  };
+  const YAML::Node root = YAML::LoadFile(path.string());
+  const YAML::Node parameters = root["parameters"];
+  if (!parameters || !parameters.IsSequence())
+    throw std::runtime_error("search space '" + path.string() +
+                             "' must have a top-level 'parameters' sequence.");
+
+  SearchSpace space;
+  for (const YAML::Node &entry : parameters) {
+    ParamSpec spec;
+    spec.name = entry["field"].as<std::string>();
+    const std::string distribution = entry["distribution"].as<std::string>();
+    const auto it = kDistributions.find(distribution);
+    if (it == kDistributions.end())
+      throw std::runtime_error("Unknown distribution '" + distribution +
+                               "' for field '" + spec.name + "'.");
+    spec.distribution = it->second;
+    if (spec.distribution == Distribution::kChoice) {
+      spec.choices = entry["choices"].as<std::vector<double>>();
+    } else {
+      spec.low = entry["low"].as<double>();
+      spec.high = entry["high"].as<double>();
+    }
+    // Bind the setter by name through the Config reflection, so a YAML spec can
+    // target any field without per-field code here.
+    const std::string name = spec.name;
+    spec.apply = [name](Config &config, double value) {
+      apply_field(config, name, value);
+    };
+    space.push_back(std::move(spec));
+  }
+  validate(space);
+  return space;
 }
 
 void validate(const SearchSpace &space) {

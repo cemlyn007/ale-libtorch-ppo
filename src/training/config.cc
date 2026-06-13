@@ -31,6 +31,20 @@ void save_config(const Config &config, const std::filesystem::path &path) {
   out << node << "\n";
 }
 
+void apply_field(Config &config, const std::string &name, double value) {
+  bool found = false;
+  for_each_field(config, [&](const char *field_name, auto &field) {
+    if (found || name != field_name) return;
+    using T = std::decay_t<decltype(field)>;
+    if constexpr (std::is_same_v<T, bool>)
+      field = (value != 0.0);
+    else
+      field = static_cast<T>(value);
+    found = true;
+  });
+  if (!found) throw std::invalid_argument("Unknown config field: " + name);
+}
+
 void validate(const Config &config) {
   // The learner thread and the rollout draw from the same global RNG, so their
   // interleaving makes runs irreproducible regardless of seeding.

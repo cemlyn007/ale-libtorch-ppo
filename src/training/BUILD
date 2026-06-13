@@ -30,7 +30,10 @@ cc_library(
     srcs = ["bandit.cc"],
     hdrs = ["bandit.h"],
     strip_include_prefix = "/src",
-    deps = [":config"],
+    deps = [
+        ":config",
+        "@yaml-cpp//:yaml-cpp",
+    ],
 )
 
 cc_library(

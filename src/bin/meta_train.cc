@@ -48,7 +48,7 @@ int main(int argc, char **argv) {
   ale::Logger::setMode(ale::Logger::Warning);
 
   CLI::App app{"Bandit (Successive Halving) hyperparameter search for PPO."};
-  std::filesystem::path rom_path, base_config_path, log_path;
+  std::filesystem::path rom_path, base_config_path, log_path, search_space_path;
   size_t num_arms = 9, eta = 3, rung_budget = 20;
   uint64_t seed = 0;
   app.add_option("--rom", rom_path, "Atari ROM to train on.")
@@ -62,6 +62,10 @@ int main(int argc, char **argv) {
                  "Directory for per-arm TensorBoard logs and the winning "
                  "config (best_config.yaml).")
       ->required();
+  app.add_option("--search-space", search_space_path,
+                 "YAML search space (see configs/search_space.yaml); uses the "
+                 "built-in space if omitted.")
+      ->check(CLI::ExistingFile);
   app.add_option("--arms", num_arms, "Initial arms (rung-0 population).")
       ->capture_default_str();
   app.add_option("--eta", eta, "Halving factor: keep the top 1/eta each rung.")
@@ -88,8 +92,12 @@ int main(int argc, char **argv) {
   std::filesystem::create_directories(log_path);
 
   const training::bandit::SearchSpace space =
-      training::bandit::default_search_space();
-  spdlog::info("Search space:");
+      search_space_path.empty()
+          ? training::bandit::default_search_space()
+          : training::bandit::load_search_space(search_space_path);
+  spdlog::info("Search space ({}):", search_space_path.empty()
+                                         ? "built-in"
+                                         : search_space_path.string());
   for (const auto &spec : space)
     spdlog::info("    {}", training::bandit::describe(spec));
 

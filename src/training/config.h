@@ -1,6 +1,7 @@
 #pragma once
 #include <cstddef>
 #include <filesystem>
+#include <string>
 
 namespace training {
 
@@ -92,6 +93,12 @@ Config load_config(const std::filesystem::path &path);
 // Writes every key to a YAML file (the inverse of load_config), e.g. to persist
 // a tuned config.
 void save_config(const Config &config, const std::filesystem::path &path);
+
+// Writes `value` into the named Config field, casting to the field's real type
+// (and treating non-zero as true for bool fields). Lets callers set fields by
+// name — e.g. a search space loaded from YAML. Throws std::invalid_argument if
+// the name matches no field.
+void apply_field(Config &config, const std::string &name, double value);
 
 // Rejects internally-inconsistent configs. Throws std::invalid_argument so a
 // tuner can reject one bad arm without taking down the process.

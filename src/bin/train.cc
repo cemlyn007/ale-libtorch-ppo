@@ -34,9 +34,12 @@ std::map<std::string, google::protobuf::Value> get_parameters(
     const training::Config &config, size_t action_size) {
   std::map<std::string, google::protobuf::Value> hparams;
   auto put = [&](const char *name, const auto &field) {
+    using Field = std::decay_t<decltype(field)>;
     google::protobuf::Value value;
-    if constexpr (std::is_same_v<std::decay_t<decltype(field)>, bool>)
+    if constexpr (std::is_same_v<Field, bool>)
       value.set_bool_value(field);
+    else if constexpr (std::is_same_v<Field, std::string>)
+      value.set_string_value(field);
     else
       value.set_number_value(static_cast<double>(field));
     hparams[name] = value;
@@ -48,12 +51,13 @@ std::map<std::string, google::protobuf::Value> get_parameters(
   return hparams;
 }
 
+// `step` is the absolute global env step (log.steps offset by any resumed run's
+// starting step) so a resumed run's curves continue rather than restart at 0.
 void log_data(TensorBoardLogger &logger, const ai::rollout::Log &log,
-              const ai::ppo::train::Metrics &metrics, double lr) {
+              const ai::ppo::train::Metrics &metrics, double lr, size_t step) {
   using ai::tensor_util::gather;
   using ai::tensor_util::mean;
   using ai::tensor_util::to_vector;
-  const auto step = log.steps;
   const auto &masks = metrics.masks;
   auto scalar = [&](const char *tag, double v) {
     logger.add_scalar(tag, step, v);
@@ -181,11 +185,15 @@ int main(int argc, char **argv) {
   const auto start_time =
       std::chrono::system_clock::now().time_since_epoch().count();
   // A run is a self-contained directory <log_path>.<start_time>/ holding its
-  // event file and its checkpoints, so each run's artifacts stay together.
+  // event file and its checkpoints. Resuming reuses the checkpoint's directory
+  // so the resumed process writes its event file into the same run, which
+  // TensorBoard merges into one continuous timeline.
   const std::filesystem::path log_path = args.log_path;
   const std::filesystem::path run_dir =
-      log_path.parent_path() /
-      (log_path.filename().string() + "." + std::to_string(start_time));
+      config.resume_from.empty()
+          ? log_path.parent_path() / (log_path.filename().string() + "." +
+                                      std::to_string(start_time))
+          : std::filesystem::path(config.resume_from).parent_path();
   const std::filesystem::path logger_path =
       run_dir / (log_path.filename().string() + ".tfevents." +
                  std::to_string(start_time));
@@ -216,19 +224,22 @@ int main(int argc, char **argv) {
         {torch::RecordScope::FUNCTION, torch::RecordScope::USER_SCOPE});
   }
 
+  // Seed best_return so best.pt is only rewritten on a genuine improvement over
+  // the resumed run, not on the first rollout after a resume.
   ai::checkpoint::Checkpointer checkpointer(
       run_dir, config.checkpoint_interval,
       [&logger](size_t step, const std::string &text) {
         logger.add_text("checkpoint", step, text.c_str());
-      });
+      },
+      session.best_return());
 
   // The training session runs the (collect, update) pipeline internally; this
   // loop only drives it one rollout at a time so it can log and checkpoint each
   // result. SIGINT/SIGTERM is checked between rollouts, so a stop takes effect
   // once the in-flight step() returns — which still collects the next rollout,
   // since the generic Loop has no view of the stop signal.
-  for (size_t rollout_index = 0; rollout_index < config.num_rollouts;
-       ++rollout_index) {
+  for (size_t rollout_index = session.start_rollout_index();
+       rollout_index < config.num_rollouts; ++rollout_index) {
     if (stop.requested()) {
       spdlog::info("Stop requested — finalizing and shutting down...");
       break;
@@ -236,11 +247,20 @@ int main(int argc, char **argv) {
     spdlog::info("Rollout {} of {}", rollout_index + 1, config.num_rollouts);
     auto report = session.step();
     if (!report) break;
-    log_data(logger, *report->log, *report->metrics, report->learning_rate);
-    checkpointer.on_rollout_end(report->rollout_index, report->global_step,
+    // Absolute global step: continues across a resume so the curves don't
+    // restart at 0.
+    const size_t step = session.step_offset() + report->global_step;
+    log_data(logger, *report->log, *report->metrics, report->learning_rate,
+             step);
+    checkpointer.on_rollout_end(report->rollout_index, step,
                                 report->mean_episode_return, session.network(),
                                 session.optimizer());
   }
+  // A graceful stop breaks before the next interval, and a clean run can finish
+  // between intervals; either way flush the last completed rollout so latest.pt
+  // holds the newest weights rather than only the last interval multiple.
+  checkpointer.flush_latest(session.network(), session.optimizer(),
+                            stop.requested() ? "shutdown" : "final");
 
   if (!args.profile_path.empty()) {
     auto profiler_result = torch::autograd::profiler::disableProfiler();

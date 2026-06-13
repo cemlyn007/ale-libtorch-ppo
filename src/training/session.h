@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <functional>
+#include <limits>
 #include <memory>
 #include <optional>
 
@@ -51,6 +52,13 @@ class Session {
   // ALE's minimal action set size for this ROM, for hparam logging.
   size_t action_size() const { return action_size_; }
 
+  // Resume state restored from config.resume_from (defaults for a fresh run):
+  // the rollout index to resume at, the global-step offset that continues the
+  // TensorBoard timeline, and the best return so best.pt survives a resume.
+  size_t start_rollout_index() const { return start_rollout_index_; }
+  size_t step_offset() const { return step_offset_; }
+  double best_return() const { return best_return_; }
+
  private:
   // Publishes the learner's weights to the behaviour policy (async only).
   void sync_actor();
@@ -68,6 +76,10 @@ class Session {
   torch::Device device_;
   bool async_update_;
   size_t action_size_ = 0;
+  // Resume state; defaults mean "fresh run" when config.resume_from is empty.
+  size_t start_rollout_index_ = 0;
+  size_t step_offset_ = 0;
+  double best_return_ = -std::numeric_limits<double>::infinity();
   Network network_{nullptr};
   Network actor_{nullptr};
   std::unique_ptr<torch::optim::Adam> optimizer_;

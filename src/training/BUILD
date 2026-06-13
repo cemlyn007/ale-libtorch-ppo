@@ -53,6 +53,7 @@ cc_library(
         ":config",
         ":network",
         ":trainer",
+        "//src/ai:checkpoint",
         "//src/ai:rollout",
         "//src/ai:torch_runtime",
         "//src/ai/ppo:async_updater",
@@ -61,6 +62,7 @@ cc_library(
         "//src/ai/ppo:trainer",
         "@arcade_learning_environment//:ale",
         "@libtorch//:torch",
+        "@spdlog",
     ] + select({
         "@platforms//os:linux": ["@cuda//:cuda_headers"],
         "//conditions:default": [],

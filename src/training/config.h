@@ -1,6 +1,7 @@
 #pragma once
 #include <cstddef>
 #include <filesystem>
+#include <string>
 
 namespace training {
 
@@ -49,6 +50,9 @@ struct Config {
   // checkpointing) and best.pt whenever mean episode return improves, into a
   // run directory keyed by the same start_time stamp as the tfevents file.
   size_t checkpoint_interval;
+  // Path to a checkpoint .pt to restore network + optimizer + step from; empty
+  // starts fresh.
+  std::string resume_from;
 };
 
 // The single place where YAML keys bind to Config members. Each field keeps its
@@ -84,6 +88,7 @@ void for_each_field(Self &config, Visitor &&visit) {
   visit("async_update", config.async_update);
   visit("deterministic", config.deterministic);
   visit("checkpoint_interval", config.checkpoint_interval);
+  visit("resume_from", config.resume_from);
 }
 
 // Loads every key from a YAML file; a missing key is a hard error.

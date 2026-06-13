@@ -22,6 +22,17 @@ cc_library(
     deps = ["@libtorch//:torch"],
 )
 
+# Bandit-based HPO controller (Successive Halving). Pure orchestration over the
+# Config search space; the evaluator is injected, so it never links the training
+# stack and stays unit-testable without a GPU.
+cc_library(
+    name = "bandit",
+    srcs = ["bandit.cc"],
+    hdrs = ["bandit.h"],
+    strip_include_prefix = "/src",
+    deps = [":config"],
+)
+
 cc_library(
     name = "trainer",
     srcs = ["trainer.cc"],

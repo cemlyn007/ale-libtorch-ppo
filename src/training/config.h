@@ -89,6 +89,10 @@ void for_each_field(Self &config, Visitor &&visit) {
 // Loads every key from a YAML file; a missing key is a hard error.
 Config load_config(const std::filesystem::path &path);
 
+// Writes every key to a YAML file (the inverse of load_config), e.g. to persist
+// a tuned config.
+void save_config(const Config &config, const std::filesystem::path &path);
+
 // Rejects internally-inconsistent configs. Throws std::invalid_argument so a
 // tuner can reject one bad arm without taking down the process.
 void validate(const Config &config);

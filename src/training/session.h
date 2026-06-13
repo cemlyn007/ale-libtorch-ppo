@@ -31,6 +31,15 @@ class Session {
           std::optional<std::filesystem::path> video_path,
           const torch::Device &device, uint64_t seed);
 
+  // Non-movable and non-copyable: the action selector captures `this`, so a
+  // moved-from Session would leave the rollout calling into a dead object. A
+  // tuner driving many runs must hold them by pointer (e.g. a
+  // std::vector<std::unique_ptr<Session>>), not by value.
+  Session(const Session &) = delete;
+  Session &operator=(const Session &) = delete;
+  Session(Session &&) = delete;
+  Session &operator=(Session &&) = delete;
+
   // One (update, collect) iteration; nullopt once num_rollouts is exhausted.
   // The returned report is valid until the next step() call.
   std::optional<ai::ppo::RolloutReport> step() { return loop_->step(); }
@@ -48,9 +57,14 @@ class Session {
   std::function<ai::rollout::ActionResult(const torch::Tensor &)>
   make_action_selector();
 
-  // Declaration order matters for teardown: rollout_ (whose worker threads run
-  // the action selector that reads actor_/device_) must be destroyed before
-  // those members, so it is declared after them.
+  // Declaration order governs teardown (members destroyed in reverse). rollout_
+  // must be torn down before actor_/network_/device_/action_size_: the action
+  // selector captures `this` and reads them — it runs on the main thread inside
+  // Rollout::rollout(), and ~Rollout also joins the env-stepping workers, so
+  // both must finish while those members are still alive. loop_ holds the
+  // current_/next_ batches that alias rollout_'s buffers, so it is declared
+  // last to release them first. Hence rollout_/loop_ come after the state they
+  // use.
   torch::Device device_;
   bool async_update_;
   size_t action_size_ = 0;

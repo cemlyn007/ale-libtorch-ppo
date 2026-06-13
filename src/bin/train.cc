@@ -223,8 +223,10 @@ int main(int argc, char **argv) {
       });
 
   // The training session runs the (collect, update) pipeline internally; this
-  // loop only drives it one rollout at a time so it can log and checkpoint
-  // each result and bail promptly on SIGINT/SIGTERM.
+  // loop only drives it one rollout at a time so it can log and checkpoint each
+  // result. SIGINT/SIGTERM is checked between rollouts, so a stop takes effect
+  // once the in-flight step() returns — which still collects the next rollout,
+  // since the generic Loop has no view of the stop signal.
   for (size_t rollout_index = 0; rollout_index < config.num_rollouts;
        ++rollout_index) {
     if (stop.requested()) {

@@ -173,11 +173,11 @@ std::vector<Arm> sample_arms(const Config &base, size_t count, uint64_t seed,
 }
 
 Bracket successive_halving(std::vector<Arm> arms, size_t eta,
-                           size_t rung_budget, const Evaluator &evaluate) {
+                           double rung_budget, const Evaluator &evaluate) {
   Bracket bracket;
   std::vector<Arm> alive = std::move(arms);
   size_t rung = 0;
-  size_t budget = rung_budget;
+  double budget = rung_budget;
   while (true) {
     RungResult result;
     result.rung = rung;

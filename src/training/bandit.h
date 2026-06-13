@@ -71,15 +71,15 @@ struct Arm {
 std::vector<Arm> sample_arms(const Config &base, size_t count, uint64_t seed,
                              const SearchSpace &space);
 
-// Trains `arm` to `budget` rollouts and returns its score (higher is better);
-// the implementation is expected to set config.num_rollouts = budget. A score
-// of -inf means the arm produced no usable signal at this budget.
-using Evaluator = std::function<double(const Arm &arm, size_t budget)>;
+// Scores `arm` given the rung's `budget` — an abstract resource the evaluator
+// interprets (meta_train uses wall-clock training seconds). Higher is better; a
+// score of -inf means the arm produced no usable signal within the budget.
+using Evaluator = std::function<double(const Arm &arm, double budget)>;
 
 // One rung: every surviving arm scored at the rung's budget, sorted best-first.
 struct RungResult {
   size_t rung;
-  size_t budget;
+  double budget;
   std::vector<std::pair<Arm, double>> scored;  // descending by score
 };
 
@@ -94,6 +94,6 @@ struct Bracket {
 // every rung (the last holds the winner). `evaluate` is called once per
 // (arm, budget); restarting from scratch each rung needs no checkpoint resume.
 Bracket successive_halving(std::vector<Arm> arms, size_t eta,
-                           size_t rung_budget, const Evaluator &evaluate);
+                           double rung_budget, const Evaluator &evaluate);
 
 }  // namespace training::bandit

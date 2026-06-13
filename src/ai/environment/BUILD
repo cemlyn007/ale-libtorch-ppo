@@ -9,6 +9,7 @@ cc_library(
     ],
     hdrs = [
         "environment.h",
+        "state_io.h",
     ],
     strip_include_prefix = "/src",
     deps = [

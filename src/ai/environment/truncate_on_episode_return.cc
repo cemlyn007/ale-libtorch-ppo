@@ -1,5 +1,7 @@
 #include "ai/environment/truncate_on_episode_return.h"
 
+#include "ai/environment/state_io.h"
+
 namespace ai::environment {
 
 TruncateOnEpisodeReturnEnvironment::TruncateOnEpisodeReturnEnvironment(
@@ -27,6 +29,15 @@ Step TruncateOnEpisodeReturnEnvironment::step(const ale::Action &action,
 
 ale::ALEInterface &TruncateOnEpisodeReturnEnvironment::get_interface() {
   return env_->get_interface();
+}
+
+void TruncateOnEpisodeReturnEnvironment::serialize(std::ostream &os) {
+  state_io::write_pod(os, current_return_);
+  env_->serialize(os);
+}
+void TruncateOnEpisodeReturnEnvironment::deserialize(std::istream &is) {
+  current_return_ = state_io::read_pod<ale::reward_t>(is);
+  env_->deserialize(is);
 }
 
 }  // namespace ai::environment

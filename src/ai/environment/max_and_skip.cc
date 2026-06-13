@@ -1,5 +1,7 @@
 #include "ai/environment/max_and_skip.h"
 
+#include "ai/environment/state_io.h"
+
 namespace ai::environment {
 
 MaxAndSkipEnvironment::MaxAndSkipEnvironment(
@@ -59,6 +61,15 @@ Step MaxAndSkipEnvironment::step(const ale::Action &action,
 
 ale::ALEInterface &MaxAndSkipEnvironment::get_interface() {
   return env_->get_interface();
+}
+
+void MaxAndSkipEnvironment::serialize(std::ostream &os) {
+  state_io::write_vector(os, last_frame_);
+  env_->serialize(os);
+}
+void MaxAndSkipEnvironment::deserialize(std::istream &is) {
+  last_frame_ = state_io::read_vector<unsigned char>(is);
+  env_->deserialize(is);
 }
 
 }  // namespace ai::environment

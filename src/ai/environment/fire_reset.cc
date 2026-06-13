@@ -24,4 +24,7 @@ Step FireReset::step(const ale::Action &action, bool want_observation) {
 
 ale::ALEInterface &FireReset::get_interface() { return env_->get_interface(); }
 
+void FireReset::serialize(std::ostream &os) { env_->serialize(os); }
+void FireReset::deserialize(std::istream &is) { env_->deserialize(is); }
+
 }  // namespace ai::environment

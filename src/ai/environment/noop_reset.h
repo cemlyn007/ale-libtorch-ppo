@@ -14,6 +14,8 @@ class NoopResetEnvironment : public VirtualEnvironment {
   ScreenBuffer reset() override;
   Step step(const ale::Action &action, bool want_observation) override;
   ale::ALEInterface &get_interface() override;
+  void serialize(std::ostream &os) override;
+  void deserialize(std::istream &is) override;
 
  private:
   std::unique_ptr<VirtualEnvironment> env_;

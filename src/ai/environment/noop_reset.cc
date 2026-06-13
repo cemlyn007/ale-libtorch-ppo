@@ -1,5 +1,9 @@
 #include "ai/environment/noop_reset.h"
 
+#include <sstream>
+
+#include "ai/environment/state_io.h"
+
 namespace ai::environment {
 
 NoopResetEnvironment::NoopResetEnvironment(
@@ -32,6 +36,19 @@ Step NoopResetEnvironment::step(const ale::Action &action,
 
 ale::ALEInterface &NoopResetEnvironment::get_interface() {
   return env_->get_interface();
+}
+
+void NoopResetEnvironment::serialize(std::ostream &os) {
+  // mt19937 round-trips via its stream operators.
+  std::ostringstream rng;
+  rng << random_generator_;
+  state_io::write_bytes(os, rng.str());
+  env_->serialize(os);
+}
+void NoopResetEnvironment::deserialize(std::istream &is) {
+  std::istringstream rng(state_io::read_bytes(is));
+  rng >> random_generator_;
+  env_->deserialize(is);
 }
 
 }  // namespace ai::environment

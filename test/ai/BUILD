@@ -20,6 +20,29 @@ cc_test(
 )
 
 cc_test(
+    name = "state_io_test",
+    srcs = ["state_io_test.cc"],
+    # rollout.h pulls in torch headers flagged by GCC under -Werror.
+    copts = googletest_copts + ["-Wno-error=interference-size"],
+    data = [
+        "//:roms",
+    ],
+    deps = [
+        "//src/ai:rollout",
+        "//src/ai/environment",
+        "//src/ai/environment:episode_life",
+        "//src/ai/environment:fire_reset",
+        "//src/ai/environment:max_and_skip",
+        "//src/ai/environment:noop_reset",
+        "//src/ai/environment:resize",
+        "//src/ai/environment:truncate_on_episode_return",
+        "@arcade_learning_environment//:ale",
+        "@googletest//:gtest_main",
+        "@libtorch//:torch",
+    ],
+)
+
+cc_test(
     name = "vision-test",
     srcs = ["vision-test.cc"],
     copts = googletest_copts,

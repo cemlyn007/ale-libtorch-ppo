@@ -1,5 +1,7 @@
 #include "ai/environment/environment.h"
 
+#include "ai/environment/state_io.h"
+
 namespace ai::environment {
 
 Environment::Environment(const std::filesystem::path &rom_path,
@@ -43,6 +45,17 @@ Step Environment::step(const ale::Action &action, bool want_observation) {
 }
 
 ale::ALEInterface &Environment::get_interface() { return ale_; }
+
+void Environment::serialize(std::ostream &os) {
+  // cloneSystemState() captures the emulator state including the RNG.
+  ale::ALEState state = ale_.cloneSystemState();
+  state_io::write_bytes(os, state.serialize());
+}
+
+void Environment::deserialize(std::istream &is) {
+  ale::ALEState state(state_io::read_bytes(is));
+  ale_.restoreState(state);
+}
 
 ScreenBuffer Environment::get_observation() {
   ScreenBuffer observation(size_);

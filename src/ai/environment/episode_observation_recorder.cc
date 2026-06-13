@@ -34,4 +34,13 @@ ale::ALEInterface& EpisodeObservationRecorder::get_interface() {
   return env_->get_interface();
 }
 
+// Video output is append-only and not part of restorable training state, so
+// only the wrapped environment is snapshotted.
+void EpisodeObservationRecorder::serialize(std::ostream& os) {
+  env_->serialize(os);
+}
+void EpisodeObservationRecorder::deserialize(std::istream& is) {
+  env_->deserialize(is);
+}
+
 }  // namespace ai::environment

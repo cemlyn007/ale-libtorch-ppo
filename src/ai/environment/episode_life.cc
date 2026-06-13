@@ -1,5 +1,7 @@
 #include "ai/environment/episode_life.h"
 
+#include "ai/environment/state_io.h"
+
 namespace ai::environment {
 
 EpisodeLife::EpisodeLife(std::unique_ptr<VirtualEnvironment> env)
@@ -40,6 +42,17 @@ Step EpisodeLife::step(const ale::Action &action, bool want_observation) {
 
 ale::ALEInterface &EpisodeLife::get_interface() {
   return env_->get_interface();
+}
+
+void EpisodeLife::serialize(std::ostream &os) {
+  state_io::write_pod(os, lives_);
+  state_io::write_pod(os, game_over_);
+  env_->serialize(os);
+}
+void EpisodeLife::deserialize(std::istream &is) {
+  lives_ = state_io::read_pod<int>(is);
+  game_over_ = state_io::read_pod<bool>(is);
+  env_->deserialize(is);
 }
 
 }  // namespace ai::environment

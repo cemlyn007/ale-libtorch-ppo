@@ -125,6 +125,9 @@ class FakeEnvironment : public ai::environment::VirtualEnvironment {
   ale::ALEInterface &get_interface() override {
     throw std::logic_error("FakeEnvironment has no ALE interface.");
   }
+  // Not exercised by these tests; the fake holds no restorable state.
+  void serialize(std::ostream &) override {}
+  void deserialize(std::istream &) override {}
 
   std::vector<int> grabbed_frames;
 

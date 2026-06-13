@@ -59,6 +59,16 @@ class Rollout {
   RolloutResult rollout();
   void update_observations();
 
+  // Persist / restore the full state needed to continue collection: every
+  // environment's wrapper-stack + ALE state, each env's in-progress episode
+  // return/length and game return/length, the stacked observation history, and
+  // the global step/episode counters, to/from a single binary file. Call only
+  // between rollout() calls (workers idle); load_state requires an
+  // identically-configured Rollout (same env count, frame stack, ROM,
+  // wrappers).
+  void save_state(const std::filesystem::path &path);
+  void load_state(const std::filesystem::path &path);
+
   float gae_discount_ = 0.99f;
   float gae_lambda_ = 0.95f;
 

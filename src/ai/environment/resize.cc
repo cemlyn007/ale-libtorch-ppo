@@ -38,6 +38,9 @@ ale::ALEInterface &ResizeEnvironment::get_interface() {
   return env_->get_interface();
 }
 
+void ResizeEnvironment::serialize(std::ostream &os) { env_->serialize(os); }
+void ResizeEnvironment::deserialize(std::istream &is) { env_->deserialize(is); }
+
 ScreenBuffer ResizeEnvironment::resize(const ScreenBuffer &observation) const {
   // Expect grayscale input of size height_ * width_
   if (static_cast<int>(observation.size()) != width_ * height_)

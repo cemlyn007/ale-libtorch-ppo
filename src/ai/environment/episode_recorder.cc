@@ -48,6 +48,11 @@ ale::ALEInterface& EpisodeRecorder::get_interface() {
   return env_->get_interface();
 }
 
+// Video output is append-only and not part of restorable training state, so
+// only the wrapped environment is snapshotted.
+void EpisodeRecorder::serialize(std::ostream& os) { env_->serialize(os); }
+void EpisodeRecorder::deserialize(std::istream& is) { env_->deserialize(is); }
+
 void EpisodeRecorder::update_buffer() {
   if (grayscale_)
     env_->get_interface().getScreenGrayscale(buffer_);

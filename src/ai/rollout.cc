@@ -3,7 +3,9 @@
 #include <spdlog/spdlog.h>
 
 #include <cassert>
+#include <fstream>
 #include <numeric>
+#include <stdexcept>
 
 #include "ai/environment/episode_life.h"
 #include "ai/environment/episode_observation_recorder.h"
@@ -12,6 +14,7 @@
 #include "ai/environment/max_and_skip.h"
 #include "ai/environment/noop_reset.h"
 #include "ai/environment/resize.h"
+#include "ai/environment/state_io.h"
 #include "ai/environment/truncate_on_episode_return.h"
 #include "ai/gae.h"
 
@@ -444,4 +447,90 @@ StepResult Rollout::step(const size_t environment_index) {
               observation.data(), observation.size());
   return output;
 }
+void Rollout::save_state(const std::filesystem::path &path) {
+  namespace io = ai::environment::state_io;
+  // Write to a sibling temp file then rename so a crash mid-write can never
+  // truncate an existing checkpoint (rename is atomic on one filesystem).
+  auto tmp = path;
+  tmp += ".tmp";
+  {
+    std::ofstream os(tmp, std::ios::binary);
+    if (!os)
+      throw std::runtime_error("Cannot open " + tmp.string() + " for writing.");
+    // Header: shape so load_state can reject a mismatched Rollout.
+    io::write_pod<uint64_t>(os, total_environments_);
+    io::write_pod<uint64_t>(os, frame_stack_);
+    io::write_pod<uint64_t>(os, height_);
+    io::write_pod<uint64_t>(os, width_);
+    io::write_pod<uint64_t>(os, current_episode_);
+    io::write_pod<uint64_t>(os, total_steps_);
+    // Per-env accumulators and the step-state host mirrors.
+    io::write_vector(os, episode_returns_);
+    io::write_vector(os, episode_lengths_);
+    io::write_vector(os, game_returns_);
+    io::write_vector(os, game_lengths_);
+    io::write_vector(os, rewards_host_);
+    io::write_vector(os, terminated_host_);
+    io::write_vector(os, truncated_host_);
+    io::write_vector(os, is_episode_start_cpu_);
+    // vector<bool> is bit-packed; widen to bytes for a plain memcpy.
+    const std::vector<uint8_t> game_overs(game_overs_.begin(),
+                                          game_overs_.end());
+    io::write_vector(os, game_overs);
+    // Stacked observation history (the policy's input) as raw bytes.
+    const auto observations =
+        observations_.to(torch::kCPU, torch::kByte).contiguous();
+    const auto observations_bytes = static_cast<uint64_t>(observations.numel());
+    io::write_pod<uint64_t>(os, observations_bytes);
+    os.write(reinterpret_cast<const char *>(observations.data_ptr<uint8_t>()),
+             static_cast<std::streamsize>(observations_bytes));
+    // Each environment's full wrapper-stack + ALE state, in env order.
+    for (const auto &environment : environments_) environment->serialize(os);
+  }
+  std::filesystem::rename(tmp, path);
+}
+
+void Rollout::load_state(const std::filesystem::path &path) {
+  namespace io = ai::environment::state_io;
+  std::ifstream is(path, std::ios::binary);
+  if (!is)
+    throw std::runtime_error("Cannot open " + path.string() + " for reading.");
+  const auto environments = io::read_pod<uint64_t>(is);
+  const auto frame_stack = io::read_pod<uint64_t>(is);
+  const auto height = io::read_pod<uint64_t>(is);
+  const auto width = io::read_pod<uint64_t>(is);
+  if (environments != total_environments_ || frame_stack != frame_stack_ ||
+      height != height_ || width != width_)
+    throw std::runtime_error(
+        "Rollout state shape mismatch: this Rollout is configured differently "
+        "from the one that was saved.");
+  current_episode_ = io::read_pod<uint64_t>(is);
+  total_steps_ = io::read_pod<uint64_t>(is);
+  episode_returns_ = io::read_vector<float>(is);
+  episode_lengths_ = io::read_vector<size_t>(is);
+  game_returns_ = io::read_vector<float>(is);
+  game_lengths_ = io::read_vector<size_t>(is);
+  rewards_host_ = io::read_vector<float>(is);
+  terminated_host_ = io::read_vector<uint8_t>(is);
+  truncated_host_ = io::read_vector<uint8_t>(is);
+  is_episode_start_cpu_ = io::read_vector<uint8_t>(is);
+  const auto game_overs = io::read_vector<uint8_t>(is);
+  game_overs_.assign(game_overs.begin(), game_overs.end());
+  // Observation history back onto the rollout's device.
+  const auto observations_bytes = io::read_pod<uint64_t>(is);
+  std::vector<uint8_t> observation_data(observations_bytes);
+  is.read(reinterpret_cast<char *>(observation_data.data()),
+          static_cast<std::streamsize>(observations_bytes));
+  const auto observations = torch::from_blob(
+      observation_data.data(),
+      {static_cast<int64_t>(total_environments_),
+       static_cast<int64_t>(frame_stack_), static_cast<int64_t>(height_),
+       static_cast<int64_t>(width_)},
+      torch::kByte);
+  observations_.copy_(observations.to(observations_.device()));
+  // Each environment, then re-publish the host step-state to the device.
+  for (const auto &environment : environments_) environment->deserialize(is);
+  upload_step_state(0, total_environments_);
+}
+
 }  // namespace ai::rollout

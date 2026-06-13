@@ -24,6 +24,9 @@ max_return: 864
 record_observation: false
 record_video: true
 cuda_graph: false
+# Overlap each PPO update with collecting the next rollout (double-buffered
+# async PPO); incompatible with deterministic.
+async_update: true
 deterministic: false
 # Save latest.pt every N rollouts and best.pt on return improvement; 0 disables.
 checkpoint_interval: 1000

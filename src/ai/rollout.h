@@ -41,6 +41,10 @@ struct StepResult {
 
 class Rollout {
  public:
+  // num_buffers: rollout buffers cycled round-robin across rollout() calls.
+  // The returned batch aliases the buffer it was collected into, so 2 lets a
+  // caller train on rollout k while rollout k+1 is collected (double
+  // buffering); 1 reuses the same storage every call.
   Rollout(std::filesystem::path rom_path, size_t total_environments,
           size_t horizon, size_t max_steps, size_t frame_stack, bool grayscale,
           std::function<ActionResult(const torch::Tensor &)> action_selector,
@@ -48,7 +52,8 @@ class Rollout {
           size_t seed, size_t num_workers, size_t worker_batch_size,
           size_t frame_skip, ale::reward_t max_return = 0.0f,
           std::optional<std::filesystem::path> video_path = std::nullopt,
-          bool record_observation = false, size_t pipeline_groups = 1);
+          bool record_observation = false, size_t pipeline_groups = 1,
+          size_t num_buffers = 1);
   ~Rollout();
   RolloutResult rollout();
   void update_observations();
@@ -71,10 +76,14 @@ class Rollout {
   void update_observations(size_t env_start, size_t env_count);
   void worker();
 
+  ai::buffer::Buffer &active_buffer() { return buffers_[active_buffer_index_]; }
+
   std::filesystem::path rom_path_;
   size_t height_;
   size_t width_;
-  ai::buffer::Buffer buffer_;
+  // Rotated by one after every rollout() (see num_buffers in the constructor).
+  std::vector<ai::buffer::Buffer> buffers_;
+  size_t active_buffer_index_ = 0;
   // Single page-locked staging buffer [total_environments, ...frame_shape] for
   // the newest frame of every env. Workers memcpy into disjoint slices; one
   // async H2D copy per step feeds the frame stack.

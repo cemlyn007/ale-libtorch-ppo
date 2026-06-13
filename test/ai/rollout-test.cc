@@ -27,7 +27,8 @@ class RolloutTest : public ::testing::Test {
   ai::rollout::Rollout construct_rollout(size_t total_environments,
                                          size_t num_workers,
                                          size_t worker_batch_size,
-                                         size_t pipeline_groups = 1) {
+                                         size_t pipeline_groups = 1,
+                                         size_t num_buffers = 1) {
     ale::ALEInterface ale;
     ale.loadROM(rom_path_);
     const auto action_size =
@@ -45,7 +46,7 @@ class RolloutTest : public ::testing::Test {
         torch::Device(torch::kCPU), /*seed=*/42, num_workers, worker_batch_size,
         /*frame_skip=*/4, /*max_return=*/0.0f,
         /*video_path=*/std::nullopt, /*record_observation=*/false,
-        pipeline_groups);
+        pipeline_groups, num_buffers);
   }
 
   static constexpr size_t kTotalEnvironments = 2;
@@ -127,6 +128,50 @@ TEST_F(RolloutTest, InvalidPipelineGroupingThrows) {
                                  /*worker_batch_size=*/2,
                                  /*pipeline_groups=*/2),
                std::invalid_argument);
+}
+
+// A zero buffer count could never store a rollout; the constructor must
+// reject it up front like the other degenerate sizes.
+TEST_F(RolloutTest, ZeroBuffersThrows) {
+  EXPECT_THROW(construct_rollout(kTotalEnvironments, /*num_workers=*/1,
+                                 /*worker_batch_size=*/1, /*pipeline_groups=*/1,
+                                 /*num_buffers=*/0),
+               std::invalid_argument);
+}
+
+// The default single buffer hands back the same storage every rollout — the
+// contract the synchronous training loop relies on (and the baseline for the
+// double-buffered test below).
+TEST_F(RolloutTest, SingleBufferReusesStorage) {
+  auto rollout = construct_rollout(kTotalEnvironments, /*num_workers=*/1,
+                                   /*worker_batch_size=*/1);
+  const auto first = rollout.rollout();
+  const auto second = rollout.rollout();
+  EXPECT_EQ(first.batch.observations.data_ptr(),
+            second.batch.observations.data_ptr());
+}
+
+// With two buffers, consecutive rollouts must land in alternating storage and
+// leave the previous batch intact while the next one is collected — the
+// guarantee the async update trains on. The third rollout wraps around to the
+// first buffer again.
+TEST_F(RolloutTest, DoubleBufferingPreservesPreviousBatch) {
+  auto rollout = construct_rollout(kTotalEnvironments, /*num_workers=*/1,
+                                   /*worker_batch_size=*/1,
+                                   /*pipeline_groups=*/1, /*num_buffers=*/2);
+  const auto first = rollout.rollout();
+  const auto first_observations = first.batch.observations.clone();
+  const auto first_advantages = first.batch.advantages.clone();
+  const auto second = rollout.rollout();
+  EXPECT_NE(first.batch.observations.data_ptr(),
+            second.batch.observations.data_ptr());
+  EXPECT_NE(first.batch.advantages.data_ptr(),
+            second.batch.advantages.data_ptr());
+  EXPECT_TRUE(torch::equal(first.batch.observations, first_observations));
+  EXPECT_TRUE(torch::equal(first.batch.advantages, first_advantages));
+  const auto third = rollout.rollout();
+  EXPECT_EQ(first.batch.observations.data_ptr(),
+            third.batch.observations.data_ptr());
 }
 
 // With a deterministic selector, grouping must not change trajectories: the

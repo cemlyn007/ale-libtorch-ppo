@@ -25,13 +25,13 @@ Rollout::Rollout(
     size_t seed, size_t num_workers, size_t worker_batch_size,
     size_t frame_skip, ale::reward_t max_return,
     std::optional<std::filesystem::path> video_path, bool record_observation,
-    size_t pipeline_groups)
+    size_t pipeline_groups, size_t num_buffers)
     : gae_discount_(gae_discount),
       gae_lambda_(gae_lambda),
       rom_path_(rom_path),
       height_(84),
       width_(84),
-      buffer_([&] {
+      buffers_([&] {
         ale::ALEInterface ale;
         ale.loadROM(rom_path);
         std::vector<size_t> observation_shape;
@@ -39,9 +39,13 @@ Rollout::Rollout(
           observation_shape = {frame_stack, height_, width_};
         else
           observation_shape = {frame_stack, 3, height_, width_};
-        return ai::buffer::Buffer(total_environments, horizon,
-                                  observation_shape,
-                                  ale.getMinimalActionSet().size(), device);
+        const size_t action_size = ale.getMinimalActionSet().size();
+        std::vector<ai::buffer::Buffer> buffers;
+        buffers.reserve(num_buffers);
+        for (size_t i = 0; i < num_buffers; ++i)
+          buffers.emplace_back(total_environments, horizon, observation_shape,
+                               action_size, device);
+        return buffers;
       }()),
       total_environments_(total_environments),
       horizon_(horizon),
@@ -73,6 +77,9 @@ Rollout::Rollout(
   }
   if (num_groups_ == 0) {
     throw std::invalid_argument("Pipeline groups must be greater than 0.");
+  }
+  if (buffers_.empty()) {
+    throw std::invalid_argument("Number of buffers must be greater than 0.");
   }
   if (total_environments_ % num_groups_ != 0) {
     throw std::invalid_argument(
@@ -332,7 +339,7 @@ void Rollout::post_group(size_t group, size_t time_index, Log &log) {
 
   // Add the observations, and the actions that from those observations led
   // to the rewards and terminal state changes.
-  buffer_.add_rows(
+  active_buffer().add_rows(
       start, count, static_cast<int64_t>(time_index),
       observations_.narrow(0, start, count), group_results_[group].actions,
       rewards_.narrow(0, start, count), is_terminated_.narrow(0, start, count),
@@ -390,7 +397,10 @@ RolloutResult Rollout::rollout() {
   // Bootstrap values for GAE from the observations after the final step.
   const auto action_result = action_selector_(observations_);
   const auto batch =
-      buffer_.get(action_result.values, gae_discount_, gae_lambda_);
+      active_buffer().get(action_result.values, gae_discount_, gae_lambda_);
+  // Rotate so the next rollout fills a different buffer and the batch just
+  // returned stays valid while the caller consumes it.
+  active_buffer_index_ = (active_buffer_index_ + 1) % buffers_.size();
   log.steps = total_steps_;
   log.episodes = current_episode_;
   return {batch, log};

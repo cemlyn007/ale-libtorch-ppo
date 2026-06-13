@@ -9,10 +9,15 @@
 #include <ale/ale_interface.hpp>
 #include <ale/common/Log.hpp>
 #include <ale/version.hpp>
+#include <condition_variable>
 #include <cstdlib>
+#include <future>
 #include <memory>
+#include <mutex>
 #include <numeric>
 #include <optional>
+#include <queue>
+#include <thread>
 #include <type_traits>
 
 #include "ai/checkpoint.h"
@@ -55,6 +60,11 @@ struct Config {
   bool record_observation;
   bool record_video;
   bool cuda_graph;
+  // Double-buffered async PPO: run each update on a learner thread (side CUDA
+  // stream) while the next rollout is collected with a snapshot of the policy.
+  // Data is at most one policy version stale; the stored behaviour logits keep
+  // the PPO ratio correct. false = the classic synchronous loop.
+  bool async_update;
   bool deterministic;
   // Write latest.pt every `checkpoint_interval` rollouts (0 disables all
   // checkpointing) and best.pt whenever mean episode return improves, into a
@@ -92,6 +102,7 @@ void for_each_field(Self &config, Visitor &&visit) {
   visit("record_observation", config.record_observation);
   visit("record_video", config.record_video);
   visit("cuda_graph", config.cuda_graph);
+  visit("async_update", config.async_update);
   visit("deterministic", config.deterministic);
   visit("checkpoint_interval", config.checkpoint_interval);
 }
@@ -405,6 +416,84 @@ std::unique_ptr<Trainer> make_trainer(const Config &config, Network network,
 #endif
 }
 
+// Runs PPO updates on a dedicated thread so the main thread can collect the
+// next rollout concurrently (async_update). On CUDA the updates run on a side
+// stream, ordered after everything the main thread has enqueued (the rollout's
+// GAE produced the batch); each job host-syncs that stream before fulfilling
+// its future, so a joined future means the new weights are ready to read.
+class AsyncUpdater {
+ public:
+  explicit AsyncUpdater(const torch::Device &device) {
+#ifdef __linux__
+    if (device.is_cuda()) stream_ = at::cuda::getStreamFromPool();
+#else
+    (void)device;
+#endif
+    thread_ = std::thread([this] { loop(); });
+  }
+
+  ~AsyncUpdater() {
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      stop_ = true;
+    }
+    condition_variable_.notify_one();
+    thread_.join();
+  }
+
+  std::future<void> submit(std::function<void()> job) {
+    std::packaged_task<void()> task([this, job = std::move(job)] {
+#ifdef __linux__
+      if (stream_.has_value()) {
+        auto main_stream = at::cuda::getDefaultCUDAStream();
+        ai::ppo::train::stream_sync(main_stream, stream_.value());
+        job();
+        stream_->synchronize();
+        return;
+      }
+#endif
+      job();
+    });
+    auto future = task.get_future();
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      jobs_.push(std::move(task));
+    }
+    condition_variable_.notify_one();
+    return future;
+  }
+
+ private:
+  void loop() {
+#ifdef __linux__
+    // Thread-local, so set once: every update this thread runs stays off the
+    // default stream and can overlap the rollout's inference kernels.
+    if (stream_.has_value()) at::cuda::setCurrentCUDAStream(stream_.value());
+#endif
+    while (true) {
+      std::packaged_task<void()> task;
+      {
+        std::unique_lock<std::mutex> lock(mutex_);
+        condition_variable_.wait(lock,
+                                 [this] { return stop_ || !jobs_.empty(); });
+        if (jobs_.empty()) return;  // stop_ set and queue drained
+        task = std::move(jobs_.front());
+        jobs_.pop();
+      }
+      task();  // exceptions land in the job's future
+    }
+  }
+
+#ifdef __linux__
+  std::optional<at::cuda::CUDAStream> stream_;
+#endif
+  std::mutex mutex_;
+  std::condition_variable condition_variable_;
+  std::queue<std::packaged_task<void()>> jobs_;
+  bool stop_ = false;
+  std::thread thread_;
+};
+
 void enable_torch_determinism(uint64_t seed) {
   // As per the logged warning by LibTorch: "Warning: Deterministic behavior was
   // enabled with either `torch.use_deterministic_algorithms(True)` or
@@ -476,6 +565,12 @@ Arguments parse_arguments(int argc, char **argv) {
   // path then would silently disable recording -- fail loudly instead.
   if (config.record_video && video_dir.empty()) {
     spdlog::error("record_video is enabled but --video-dir was not provided.");
+    std::exit(1);
+  }
+  // The learner thread and the rollout draw from the same global RNG, so their
+  // interleaving makes runs irreproducible regardless of seeding.
+  if (config.async_update && config.deterministic) {
+    spdlog::error("async_update is incompatible with deterministic.");
     std::exit(1);
   }
   std::optional<std::filesystem::path> video_path =
@@ -552,15 +647,32 @@ int main(int argc, char **argv) {
       network->parameters(),
       torch::optim::AdamOptions(config.learning_rate).eps(1e-5));
 
+  // The rollout's behaviour policy. Synchronous mode shares the learner's
+  // module; async mode acts on a snapshot copy so the learner thread can write
+  // the real weights while the rollout reads these (sync_actor publishes).
+  Network actor = network;
+  if (config.async_update) {
+    actor = Network(config.hidden_size, action_size);
+    actor->to(device);
+  }
+  auto sync_actor = [&] {
+    if (!config.async_update) return;
+    torch::NoGradGuard no_grad;
+    const auto source = network->parameters();
+    auto destination = actor->parameters();
+    for (size_t i = 0; i < source.size(); ++i) destination[i].copy_(source[i]);
+  };
+  sync_actor();
+
   ai::rollout::Rollout rollout(
       rom_path, config.total_environments, config.horizon, config.max_steps,
       config.frame_stack, true,
-      [&network, &device,
+      [&actor, &device,
        action_size](const torch::Tensor &obs) -> ai::rollout::ActionResult {
-        network->eval();
+        actor->eval();
         torch::NoGradGuard no_grad;
         auto observations = device.is_cuda() ? obs.to(torch::kFloat32) : obs;
-        auto output = network->forward(observations.to(device));
+        auto output = actor->forward(observations.to(device));
         auto logits = output.logits;
         auto probabilities = torch::nn::functional::softmax(logits, -1);
         auto actions = torch::multinomial(probabilities, 1, true);
@@ -570,7 +682,10 @@ int main(int argc, char **argv) {
       },
       config.gae_discount, config.gae_lambda, device, 0, config.num_workers,
       config.worker_batch_size, config.frame_skip, config.max_return,
-      video_path, config.record_observation, config.pipeline_groups);
+      video_path, config.record_observation, config.pipeline_groups,
+      // Double buffering keeps the batch under training intact while the next
+      // rollout is collected into the other buffer.
+      config.async_update ? 2 : 1);
   torch::Tensor indices =
       torch::empty(config.mini_batch_size * config.num_mini_batches,
                    torch::TensorOptions().dtype(torch::kLong).device(device));
@@ -585,12 +700,26 @@ int main(int argc, char **argv) {
     torch::NoGradGuard no_grad;
     auto b = rollout.rollout().batch;
     initial_batch = prepare_batch(b);
+    // The CUDA-graph trainer keeps initial_batch as its persistent input and
+    // copies every fresh rollout into it, but prepare_batch returns views of
+    // the rollout buffer: give the graph its own storage so those copies never
+    // write into (or race) a buffer a collection is filling.
+    if (config.cuda_graph)
+      initial_batch = {initial_batch.observations.clone(),
+                       initial_batch.actions.clone(),
+                       initial_batch.log_probabilities.clone(),
+                       initial_batch.advantages.clone(),
+                       initial_batch.returns.clone(),
+                       initial_batch.masks.clone()};
   }
   // On the CUDA-graph path make_trainer captures the graph here, using
   // initial_batch as its persistent input buffer; the eager path ignores it.
   std::unique_ptr<Trainer> trainer = make_trainer(
       config, network, optimizer, metrics, indices, std::move(initial_batch));
-  ai::rollout::RolloutResult result;
+  // CUDA-graph capture warm-up steps the real weights; republish to the actor.
+  sync_actor();
+  std::unique_ptr<AsyncUpdater> updater;
+  if (config.async_update) updater = std::make_unique<AsyncUpdater>(device);
   if (!profile_path.empty()) {
     torch::autograd::profiler::ProfilerConfig profiler_config =
         torch::autograd::profiler::ProfilerConfig(
@@ -607,6 +736,15 @@ int main(int argc, char **argv) {
       [&logger](size_t step, const std::string &text) {
         logger.add_text("checkpoint", step, text.c_str());
       });
+  // Software pipeline of depth one over (collect, update): iteration k trains
+  // on rollout k while rollout k+1 is collected with the actor's snapshot of
+  // the weights. With async_update=false the update instead runs inline before
+  // the next collect -- the classic synchronous loop, op for op.
+  ai::rollout::RolloutResult current;
+  if (config.num_rollouts > 0 && !stop.requested()) {
+    torch::NoGradGuard no_grad;
+    current = rollout.rollout();
+  }
   for (size_t rollout_index = 0; rollout_index < config.num_rollouts;
        ++rollout_index) {
     if (stop.requested()) {
@@ -618,20 +756,32 @@ int main(int argc, char **argv) {
         config.learning_rate *
         (1.0 - rollout_index / static_cast<double>(config.num_rollouts)));
 
-    {
-      torch::NoGradGuard no_grad;
-      result = rollout.rollout();
-    }
-    trainer->update(result.batch);
+    std::future<void> update_done;
+    auto update_job = [&] { trainer->update(current.batch); };
+    if (updater)
+      update_done = updater->submit(update_job);
+    else
+      update_job();
 
-    log_data(logger, result.log, metrics, trainer->learning_rate());
+    ai::rollout::RolloutResult next;
+    if (rollout_index + 1 < config.num_rollouts && !stop.requested()) {
+      torch::NoGradGuard no_grad;
+      next = rollout.rollout();
+    }
+    // Joining the updater includes its GPU work, so the learner's weights are
+    // final before they are published to the actor, logged and checkpointed.
+    if (update_done.valid()) update_done.get();
+    sync_actor();
+
+    log_data(logger, current.log, metrics, trainer->learning_rate());
 
     checkpointer.on_rollout_end(
-        rollout_index, result.log.steps,
-        result.log.episode_returns.empty()
+        rollout_index, current.log.steps,
+        current.log.episode_returns.empty()
             ? std::nullopt
-            : std::optional<double>(mean(result.log.episode_returns)),
+            : std::optional<double>(mean(current.log.episode_returns)),
         *network, optimizer);
+    current = std::move(next);
   }
   if (!profile_path.empty()) {
     auto profiler_result = torch::autograd::profiler::disableProfiler();

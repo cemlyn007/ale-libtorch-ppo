@@ -10,13 +10,6 @@ cc_library(
 )
 
 cc_library(
-    name = "checkpoint",
-    hdrs = ["checkpoint.h"],
-    strip_include_prefix = "/src",
-    deps = ["@libtorch//:torch"],
-)
-
-cc_library(
     name = "ai",
     strip_include_prefix = "/src",
     deps = [

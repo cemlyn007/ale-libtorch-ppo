@@ -10,18 +10,23 @@ entropy_coef: 0.01
 num_epochs: 2
 mini_batch_size: 64
 num_mini_batches: 4
+shuffle_mini_batches: true
 gae_discount: 0.99
 gae_lambda: 0.95
 max_gradient_norm: 0.5
 num_rollouts: 10
 num_workers: 1
 worker_batch_size: 1
+pipeline_groups: 1
 frame_skip: 4
 # Breakout max possible score.
 max_return: 864
 record_observation: false
 record_video: true
 cuda_graph: false
+# Overlap each PPO update with collecting the next rollout (double-buffered
+# async PPO); incompatible with deterministic.
+async_update: false
 deterministic: true
 # Save latest.pt every N rollouts and best.pt on return improvement; 0 disables.
 checkpoint_interval: 2

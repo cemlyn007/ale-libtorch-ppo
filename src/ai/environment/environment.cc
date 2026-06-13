@@ -5,12 +5,7 @@ namespace ai::environment {
 Environment::Environment(const std::filesystem::path &rom_path,
                          size_t max_num_frames_per_episode, bool grayscale,
                          int seed)
-    : ale_(), grayscale_(grayscale), size_([&] {
-        ale_.loadROM(rom_path.string());
-        auto screen = ale_.getScreen();
-        auto channels = grayscale_ ? 1 : 3;
-        return channels * screen.height() * screen.width();
-      }()) {
+    : ale_(), grayscale_(grayscale), size_(0) {
   if (rom_path.empty())
     throw std::invalid_argument("ROM path must not be empty.");
   if (!std::filesystem::exists(rom_path))
@@ -21,7 +16,11 @@ Environment::Environment(const std::filesystem::path &rom_path,
   ale_.setInt("frame_skip", 1);
   ale_.setFloat("repeat_action_probability", 0.0f);
   ale_.setInt("random_seed", seed);
+  // Settings only take effect on load, so the screen size (ROM-dependent)
+  // must be read after this single load.
   ale_.loadROM(rom_path.string());
+  const auto &screen = ale_.getScreen();
+  size_ = (grayscale_ ? 1 : 3) * screen.height() * screen.width();
 }
 
 ScreenBuffer Environment::reset() {
@@ -29,14 +28,14 @@ ScreenBuffer Environment::reset() {
   return get_observation();
 }
 
-Step Environment::step(const ale::Action &action) {
+Step Environment::step(const ale::Action &action, bool want_observation) {
   ale::reward_t reward = ale_.act(action);
   bool terminated = ale_.game_over(false);
   bool truncated = ale_.game_truncated() && !terminated;
   // If we have exceeded our max frames, we consider the game to be over as
   // well.
   bool game_over = terminated || truncated;
-  return {.observation = get_observation(),
+  return {.observation = want_observation ? get_observation() : ScreenBuffer(),
           .reward = reward,
           .terminated = terminated,
           .truncated = truncated,

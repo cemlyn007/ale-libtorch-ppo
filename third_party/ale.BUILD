@@ -21,6 +21,7 @@ cmake(
             "-Wno-error=unused-variable",
             "-Wno-error=sequence-point",
             "-Wno-error=sign-compare",
+            "-Wno-error=stringop-overflow",
         ],
         "@platforms//os:macos": [
             "-Wno-error=unused-but-set-variable",
@@ -42,7 +43,6 @@ cmake(
     linkopts = select({
         "@platforms//os:linux": [
             "-lpthread",
-            "-Wno-stringop-overflow",
         ],
         "@platforms//os:macos": ["-lpthread"],
         "//conditions:default": [],

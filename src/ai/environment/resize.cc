@@ -12,7 +12,8 @@ ResizeEnvironment::ResizeEnvironment(std::unique_ptr<VirtualEnvironment> env,
       width_([&] { return env_->get_interface().getScreen().width(); }()),
       height_([&] { return env_->get_interface().getScreen().height(); }()),
       new_width_(new_width),
-      new_height_(new_height) {
+      new_height_(new_height),
+      identity_(width_ == new_width_ && height_ == new_height_) {
   if (!env_) throw std::invalid_argument("Environment must not be null.");
   if (new_width_ <= 0 || new_height_ <= 0)
     throw std::invalid_argument("new_width and new_height must be > 0");
@@ -20,11 +21,15 @@ ResizeEnvironment::ResizeEnvironment(std::unique_ptr<VirtualEnvironment> env,
 
 ScreenBuffer ResizeEnvironment::reset() {
   auto observation = env_->reset();
+  // A same-size stbir resize still runs the full sampler; skip it outright.
+  if (identity_) return observation;
   return resize(observation);
 }
 
-Step ResizeEnvironment::step(const ale::Action &action) {
-  auto result = env_->step(action);
+Step ResizeEnvironment::step(const ale::Action &action, bool want_observation) {
+  auto result = env_->step(action, want_observation);
+  // An unwanted observation arrives empty; pass it through untouched.
+  if (identity_ || result.observation.empty()) return result;
   result.observation = resize(result.observation);
   return result;
 }

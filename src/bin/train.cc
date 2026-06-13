@@ -9,16 +9,22 @@
 #include <ale/ale_interface.hpp>
 #include <ale/common/Log.hpp>
 #include <ale/version.hpp>
+#include <condition_variable>
 #include <cstdlib>
+#include <future>
 #include <limits>
 #include <memory>
+#include <mutex>
 #include <numeric>
+#include <optional>
+#include <queue>
+#include <thread>
 #include <type_traits>
 
+#include "ai/checkpoint.h"
 #include "ai/ppo/losses.h"
 #include "ai/rollout.h"
 #include "ai/vision.h"
-#include "checkpoint.h"
 #include "stop_signal.h"
 #include "tensorboard_logger.h"
 
@@ -35,12 +41,17 @@ struct Config {
   long num_epochs;
   long mini_batch_size;
   long num_mini_batches;
+  bool shuffle_mini_batches;
   float gae_discount;
   float gae_lambda;
   float max_gradient_norm;
   size_t num_rollouts;
   size_t num_workers;
   size_t worker_batch_size;
+  // Contiguous env groups stepped as a software pipeline: while one group is
+  // in the workers, inference and bookkeeping run for the others. 1 = the
+  // classic fully-synchronous loop.
+  size_t pipeline_groups;
   size_t frame_skip;
   // Some games like breakout have a maximum return
   // which should be used to reset the environment.
@@ -50,6 +61,11 @@ struct Config {
   bool record_observation;
   bool record_video;
   bool cuda_graph;
+  // Double-buffered async PPO: run each update on a learner thread (side CUDA
+  // stream) while the next rollout is collected with a snapshot of the policy.
+  // Data is at most one policy version stale; the stored behaviour logits keep
+  // the PPO ratio correct. false = the classic synchronous loop.
+  bool async_update;
   bool deterministic;
   // Write latest.pt every `checkpoint_interval` rollouts (0 disables all
   // checkpointing) and best.pt whenever mean episode return improves, into a
@@ -77,17 +93,20 @@ void for_each_field(Self &config, Visitor &&visit) {
   visit("num_epochs", config.num_epochs);
   visit("mini_batch_size", config.mini_batch_size);
   visit("num_mini_batches", config.num_mini_batches);
+  visit("shuffle_mini_batches", config.shuffle_mini_batches);
   visit("gae_discount", config.gae_discount);
   visit("gae_lambda", config.gae_lambda);
   visit("max_gradient_norm", config.max_gradient_norm);
   visit("num_rollouts", config.num_rollouts);
   visit("num_workers", config.num_workers);
   visit("worker_batch_size", config.worker_batch_size);
+  visit("pipeline_groups", config.pipeline_groups);
   visit("frame_skip", config.frame_skip);
   visit("max_return", config.max_return);
   visit("record_observation", config.record_observation);
   visit("record_video", config.record_video);
   visit("cuda_graph", config.cuda_graph);
+  visit("async_update", config.async_update);
   visit("deterministic", config.deterministic);
   visit("checkpoint_interval", config.checkpoint_interval);
   visit("resume_from", config.resume_from);
@@ -272,7 +291,7 @@ ai::ppo::train::Batch prepare_batch(ai::buffer::Batch &batch) {
 ai::ppo::train::Hyperparameters prepare_hyperparameters(const Config &config) {
   ai::ppo::train::Hyperparameters hp = {
       config.clip_param, config.value_loss_coef, config.entropy_coef,
-      config.max_gradient_norm};
+      config.max_gradient_norm, config.shuffle_mini_batches};
   return hp;
 }
 
@@ -406,6 +425,84 @@ std::unique_ptr<Trainer> make_trainer(const Config &config, Network network,
 #endif
 }
 
+// Runs PPO updates on a dedicated thread so the main thread can collect the
+// next rollout concurrently (async_update). On CUDA the updates run on a side
+// stream, ordered after everything the main thread has enqueued (the rollout's
+// GAE produced the batch); each job host-syncs that stream before fulfilling
+// its future, so a joined future means the new weights are ready to read.
+class AsyncUpdater {
+ public:
+  explicit AsyncUpdater(const torch::Device &device) {
+#ifdef __linux__
+    if (device.is_cuda()) stream_ = at::cuda::getStreamFromPool();
+#else
+    (void)device;
+#endif
+    thread_ = std::thread([this] { loop(); });
+  }
+
+  ~AsyncUpdater() {
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      stop_ = true;
+    }
+    condition_variable_.notify_one();
+    thread_.join();
+  }
+
+  std::future<void> submit(std::function<void()> job) {
+    std::packaged_task<void()> task([this, job = std::move(job)] {
+#ifdef __linux__
+      if (stream_.has_value()) {
+        auto main_stream = at::cuda::getDefaultCUDAStream();
+        ai::ppo::train::stream_sync(main_stream, stream_.value());
+        job();
+        stream_->synchronize();
+        return;
+      }
+#endif
+      job();
+    });
+    auto future = task.get_future();
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      jobs_.push(std::move(task));
+    }
+    condition_variable_.notify_one();
+    return future;
+  }
+
+ private:
+  void loop() {
+#ifdef __linux__
+    // Thread-local, so set once: every update this thread runs stays off the
+    // default stream and can overlap the rollout's inference kernels.
+    if (stream_.has_value()) at::cuda::setCurrentCUDAStream(stream_.value());
+#endif
+    while (true) {
+      std::packaged_task<void()> task;
+      {
+        std::unique_lock<std::mutex> lock(mutex_);
+        condition_variable_.wait(lock,
+                                 [this] { return stop_ || !jobs_.empty(); });
+        if (jobs_.empty()) return;  // stop_ set and queue drained
+        task = std::move(jobs_.front());
+        jobs_.pop();
+      }
+      task();  // exceptions land in the job's future
+    }
+  }
+
+#ifdef __linux__
+  std::optional<at::cuda::CUDAStream> stream_;
+#endif
+  std::mutex mutex_;
+  std::condition_variable condition_variable_;
+  std::queue<std::packaged_task<void()>> jobs_;
+  bool stop_ = false;
+  std::thread thread_;
+};
+
 void enable_torch_determinism(uint64_t seed) {
   // As per the logged warning by LibTorch: "Warning: Deterministic behavior was
   // enabled with either `torch.use_deterministic_algorithms(True)` or
@@ -477,6 +574,12 @@ Arguments parse_arguments(int argc, char **argv) {
   // path then would silently disable recording -- fail loudly instead.
   if (config.record_video && video_dir.empty()) {
     spdlog::error("record_video is enabled but --video-dir was not provided.");
+    std::exit(1);
+  }
+  // The learner thread and the rollout draw from the same global RNG, so their
+  // interleaving makes runs irreproducible regardless of seeding.
+  if (config.async_update && config.deterministic) {
+    spdlog::error("async_update is incompatible with deterministic.");
     std::exit(1);
   }
   std::optional<std::filesystem::path> video_path =
@@ -557,31 +660,48 @@ int main(int argc, char **argv) {
       network->parameters(),
       torch::optim::AdamOptions(config.learning_rate).eps(1e-5));
 
-  // Restore before the initial rollout and any CUDA-graph capture so the graph
-  // captures the resumed weights/optimizer state. The rollout RNG and env state
+  // Restore before the actor snapshot and any CUDA-graph capture so both
+  // observe the resumed weights/optimizer state. The rollout RNG and env state
   // are not saved, so resumption is approximate, not bit-exact.
   size_t start_rollout_index = 0;
-  double best_return = -std::numeric_limits<double>::infinity();
   size_t step_offset = 0;
+  double best_return = -std::numeric_limits<double>::infinity();
   if (!config.resume_from.empty()) {
-    const checkpoint::Checkpoint state =
-        checkpoint::load(config.resume_from, *network, optimizer, device);
+    const ai::checkpoint::Checkpoint state =
+        ai::checkpoint::load(config.resume_from, *network, optimizer, device);
     start_rollout_index = state.next_rollout_index;
-    best_return = state.best_return;
     step_offset = state.global_step;
+    best_return = state.best_return;
     spdlog::info("Resumed from {} at rollout {} (global step {})",
                  config.resume_from, start_rollout_index, step_offset);
   }
 
+  // The rollout's behaviour policy. Synchronous mode shares the learner's
+  // module; async mode acts on a snapshot copy so the learner thread can write
+  // the real weights while the rollout reads these (sync_actor publishes).
+  Network actor = network;
+  if (config.async_update) {
+    actor = Network(config.hidden_size, action_size);
+    actor->to(device);
+  }
+  auto sync_actor = [&] {
+    if (!config.async_update) return;
+    torch::NoGradGuard no_grad;
+    const auto source = network->parameters();
+    auto destination = actor->parameters();
+    for (size_t i = 0; i < source.size(); ++i) destination[i].copy_(source[i]);
+  };
+  sync_actor();
+
   ai::rollout::Rollout rollout(
       rom_path, config.total_environments, config.horizon, config.max_steps,
       config.frame_stack, true,
-      [&network, &device,
+      [&actor, &device,
        action_size](const torch::Tensor &obs) -> ai::rollout::ActionResult {
-        network->eval();
+        actor->eval();
         torch::NoGradGuard no_grad;
         auto observations = device.is_cuda() ? obs.to(torch::kFloat32) : obs;
-        auto output = network->forward(observations.to(device));
+        auto output = actor->forward(observations.to(device));
         auto logits = output.logits;
         auto probabilities = torch::nn::functional::softmax(logits, -1);
         auto actions = torch::multinomial(probabilities, 1, true);
@@ -591,7 +711,10 @@ int main(int argc, char **argv) {
       },
       config.gae_discount, config.gae_lambda, device, 0, config.num_workers,
       config.worker_batch_size, config.frame_skip, config.max_return,
-      video_path, config.record_observation);
+      video_path, config.record_observation, config.pipeline_groups,
+      // Double buffering keeps the batch under training intact while the next
+      // rollout is collected into the other buffer.
+      config.async_update ? 2 : 1);
   torch::Tensor indices =
       torch::empty(config.mini_batch_size * config.num_mini_batches,
                    torch::TensorOptions().dtype(torch::kLong).device(device));
@@ -606,12 +729,26 @@ int main(int argc, char **argv) {
     torch::NoGradGuard no_grad;
     auto b = rollout.rollout().batch;
     initial_batch = prepare_batch(b);
+    // The CUDA-graph trainer keeps initial_batch as its persistent input and
+    // copies every fresh rollout into it, but prepare_batch returns views of
+    // the rollout buffer: give the graph its own storage so those copies never
+    // write into (or race) a buffer a collection is filling.
+    if (config.cuda_graph)
+      initial_batch = {initial_batch.observations.clone(),
+                       initial_batch.actions.clone(),
+                       initial_batch.log_probabilities.clone(),
+                       initial_batch.advantages.clone(),
+                       initial_batch.returns.clone(),
+                       initial_batch.masks.clone()};
   }
   // On the CUDA-graph path make_trainer captures the graph here, using
   // initial_batch as its persistent input buffer; the eager path ignores it.
   std::unique_ptr<Trainer> trainer = make_trainer(
       config, network, optimizer, metrics, indices, std::move(initial_batch));
-  ai::rollout::RolloutResult result;
+  // CUDA-graph capture warm-up steps the real weights; republish to the actor.
+  sync_actor();
+  std::unique_ptr<AsyncUpdater> updater;
+  if (config.async_update) updater = std::make_unique<AsyncUpdater>(device);
   if (!profile_path.empty()) {
     torch::autograd::profiler::ProfilerConfig profiler_config =
         torch::autograd::profiler::ProfilerConfig(
@@ -623,24 +760,25 @@ int main(int argc, char **argv) {
         profiler_config, activities,
         {torch::RecordScope::FUNCTION, torch::RecordScope::USER_SCOPE});
   }
-  // Write latest.pt for the just-completed rollout. Called at each interval and
-  // once more on exit, so the newest weights survive a graceful stop or a run
-  // that finishes between intervals — not just the last interval multiple.
-  auto save_latest = [&](size_t next_rollout_index, size_t step,
-                         const char *reason) {
-    checkpoint::save(run_dir / "latest.pt", *network, optimizer,
-                     {next_rollout_index, best_return, step});
-    logger.add_text("checkpoint", step,
-                    ("latest.pt rollout=" + std::to_string(next_rollout_index) +
-                     " (" + reason + ")")
-                        .c_str());
-  };
-  // Set whenever a completed rollout has not yet been flushed to latest.pt, so
-  // the post-loop flush knows there is newer progress than the last interval.
-  bool pending_latest = false;
-  size_t latest_step = step_offset;
-  size_t rollout_index = start_rollout_index;
-  for (; rollout_index < config.num_rollouts; ++rollout_index) {
+  // Seed best_return so best.pt is only rewritten on a genuine improvement over
+  // the resumed run, not on the first rollout after a resume.
+  ai::checkpoint::Checkpointer checkpointer(
+      run_dir, config.checkpoint_interval,
+      [&logger](size_t step, const std::string &text) {
+        logger.add_text("checkpoint", step, text.c_str());
+      },
+      best_return);
+  // Software pipeline of depth one over (collect, update): iteration k trains
+  // on rollout k while rollout k+1 is collected with the actor's snapshot of
+  // the weights. With async_update=false the update instead runs inline before
+  // the next collect -- the classic synchronous loop, op for op.
+  ai::rollout::RolloutResult current;
+  if (start_rollout_index < config.num_rollouts && !stop.requested()) {
+    torch::NoGradGuard no_grad;
+    current = rollout.rollout();
+  }
+  for (size_t rollout_index = start_rollout_index;
+       rollout_index < config.num_rollouts; ++rollout_index) {
     if (stop.requested()) {
       spdlog::info("Stop requested — finalizing and shutting down...");
       break;
@@ -650,48 +788,41 @@ int main(int argc, char **argv) {
         config.learning_rate *
         (1.0 - rollout_index / static_cast<double>(config.num_rollouts)));
 
-    {
+    std::future<void> update_done;
+    auto update_job = [&] { trainer->update(current.batch); };
+    if (updater)
+      update_done = updater->submit(update_job);
+    else
+      update_job();
+
+    ai::rollout::RolloutResult next;
+    if (rollout_index + 1 < config.num_rollouts && !stop.requested()) {
       torch::NoGradGuard no_grad;
-      result = rollout.rollout();
+      next = rollout.rollout();
     }
-    trainer->update(result.batch);
+    // Joining the updater includes its GPU work, so the learner's weights are
+    // final before they are published to the actor, logged and checkpointed.
+    if (update_done.valid()) update_done.get();
+    sync_actor();
 
     // Absolute global step: continues across a resume so the curves don't
     // restart at 0.
-    const size_t step = step_offset + result.log.steps;
-    latest_step = step;
-    log_data(logger, result.log, metrics, trainer->learning_rate(), step);
+    const size_t step = step_offset + current.log.steps;
+    log_data(logger, current.log, metrics, trainer->learning_rate(), step);
 
-    if (config.checkpoint_interval > 0) {
-      // next_rollout_index is rollout_index + 1: resuming continues with the
-      // rollout after the one just trained on.
-      if (!result.log.episode_returns.empty()) {
-        const double rollout_return = mean(result.log.episode_returns);
-        if (rollout_return > best_return) {
-          best_return = rollout_return;
-          checkpoint::save(run_dir / "best.pt", *network, optimizer,
-                           {rollout_index + 1, best_return, step});
-          logger.add_text("checkpoint", step,
-                          ("best.pt return=" + std::to_string(best_return) +
-                           " rollout=" + std::to_string(rollout_index + 1))
-                              .c_str());
-        }
-      }
-      if ((rollout_index + 1) % config.checkpoint_interval == 0) {
-        save_latest(rollout_index + 1, step, "interval");
-        pending_latest = false;
-      } else {
-        pending_latest = true;
-      }
-    }
+    checkpointer.on_rollout_end(
+        rollout_index, step,
+        current.log.episode_returns.empty()
+            ? std::nullopt
+            : std::optional<double>(mean(current.log.episode_returns)),
+        *network, optimizer);
+    current = std::move(next);
   }
   // A graceful stop breaks before the next interval, and a clean run can finish
   // between intervals; either way flush the last completed rollout so latest.pt
-  // holds the newest weights. Here `rollout_index` is its next_rollout_index.
-  if (config.checkpoint_interval > 0 && pending_latest) {
-    save_latest(rollout_index, latest_step,
-                stop.requested() ? "shutdown" : "final");
-  }
+  // holds the newest weights rather than only the last interval multiple.
+  checkpointer.flush_latest(*network, optimizer,
+                            stop.requested() ? "shutdown" : "final");
   if (!profile_path.empty()) {
     auto profiler_result = torch::autograd::profiler::disableProfiler();
     profiler_result->save(profile_path);

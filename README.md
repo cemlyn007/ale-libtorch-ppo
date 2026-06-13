@@ -43,7 +43,7 @@ To run the project, follow these steps:
 
 Each run is a self-contained directory — `<base>.<start_time>/` — holding its TensorBoard event file and its checkpoints (`latest.pt`, `best.pt`). Two config keys control checkpointing (see any file in `configs/`):
 
-* `checkpoint_interval`: write `latest.pt` every N rollouts, and `best.pt` whenever the mean episode return improves. `0` disables checkpointing entirely.
+* `checkpoint_interval`: write `latest.pt` every N rollouts, and `best.pt` whenever the mean episode return improves. `0` disables checkpointing entirely. `latest.pt` is also flushed once more on a graceful stop or when a run finishes between intervals, so the newest weights are never lost.
 * `resume_from`: path to a checkpoint `.pt` to restore from. Empty starts fresh.
 
 A checkpoint bundles the network weights, optimizer (Adam) state, the next rollout index (so the learning-rate schedule continues), and the global env step. Each save also drops a `checkpoint` text marker on the TensorBoard timeline so saves and resume points are visible there.

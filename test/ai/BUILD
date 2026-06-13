@@ -88,3 +88,15 @@ cc_test(
         "@libtorch//:torch",
     ],
 )
+
+cc_test(
+    name = "async-updater-test",
+    srcs = ["async-updater-test.cc"],
+    # async_updater.h includes CUDA stream headers; relax interference-size.
+    copts = googletest_copts + ["-Wno-error=interference-size"],
+    deps = [
+        "//src/ai/ppo:async_updater",
+        "@googletest//:gtest_main",
+        "@libtorch//:torch",
+    ],
+)

@@ -46,6 +46,24 @@ cc_library(
 )
 
 cc_library(
+    name = "tensor_util",
+    hdrs = ["tensor_util.h"],
+    strip_include_prefix = "/src",
+    deps = ["@libtorch//:torch"],
+)
+
+cc_library(
+    name = "torch_runtime",
+    srcs = ["torch_runtime.cc"],
+    hdrs = ["torch_runtime.h"],
+    strip_include_prefix = "/src",
+    deps = [
+        "@libtorch//:torch",
+        "@spdlog",
+    ],
+)
+
+cc_library(
     name = "gae",
     srcs = ["gae.cc"],
     hdrs = ["gae.h"],

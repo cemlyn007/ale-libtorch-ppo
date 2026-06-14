@@ -24,6 +24,7 @@
 #include "tensorboard_logger.h"
 #include "training/bandit.h"
 #include "training/config.h"
+#include "training/logging.h"
 #include "training/session.h"
 
 namespace {
@@ -148,8 +149,8 @@ int main(int argc, char **argv) {
 
     // An arm whose sampled config is internally inconsistent (e.g. a batch
     // geometry the rollout/update reject) scores -inf and is culled rather than
-    // taking the whole search down. validate() catches it up front; the try also
-    // covers anything Session construction throws.
+    // taking the whole search down. validate() catches it up front; the try
+    // also covers anything Session construction throws.
     try {
       training::validate(config);
 
@@ -176,13 +177,13 @@ int main(int argc, char **argv) {
       const auto start = std::chrono::steady_clock::now();
       for (auto report = session.step(); report; report = session.step()) {
         ++rollouts;
-        logger.add_scalar("mean_loss", report->global_step,
-                          report->metrics->loss.mean().item<float>());
-        if (report->mean_episode_return) {
-          logger.add_scalar("mean_episode_return", report->global_step,
-                            *report->mean_episode_return);
+        // Full per-rollout diagnostics for this arm. Histograms are off: the
+        // sweep trains many arms and the wall-clock budget drives the score, so
+        // we keep per-rollout logging to cheap scalars.
+        training::log_rollout(logger, *report->log, *report->metrics,
+                              report->learning_rate, /*histograms=*/false);
+        if (report->mean_episode_return)
           curve.push_back(*report->mean_episode_return);
-        }
         const double elapsed = std::chrono::duration<double>(
                                    std::chrono::steady_clock::now() - start)
                                    .count();

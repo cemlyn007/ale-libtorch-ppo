@@ -94,6 +94,25 @@ void for_each_field(Self &config, Visitor &&visit) {
 // Loads every key from a YAML file; a missing key is a hard error.
 Config load_config(const std::filesystem::path &path);
 
+// Writes every key to a YAML file (the inverse of load_config), e.g. to persist
+// a tuned config.
+void save_config(const Config &config, const std::filesystem::path &path);
+
+// Writes `value` into the named Config field, casting to the field's real type
+// (and treating non-zero as true for bool fields). Lets callers set fields by
+// name — e.g. a search space loaded from YAML. Throws std::invalid_argument if
+// the name matches no field.
+void apply_field(Config &config, const std::string &name, double value);
+
+// Recomputes the fields that are fully determined by others, so a caller (e.g.
+// the bandit tuner) can set the free fields and let the dependent ones follow.
+// Currently: mini_batch_size = horizon * total_environments / num_mini_batches
+// -- the PPO update splits the rollout that way (src/ai/ppo/train.h) and Session
+// sizes its index/metrics buffers from it (src/training/session.cc). Call after
+// mutating total_environments, horizon, or num_mini_batches; validate() then
+// confirms the result is consistent.
+void reconcile(Config &config);
+
 // Rejects internally-inconsistent configs. Throws std::invalid_argument so a
 // tuner can reject one bad arm without taking down the process.
 void validate(const Config &config);

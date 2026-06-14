@@ -1,0 +1,130 @@
+# Search space for the bandit hyperparameter tuner (//src/bin:meta_train).
+#
+# Each entry under `parameters` names a Config field (one of the keys in a
+# config YAML, e.g. configs/v2.yaml) and how the tuner should sample it for each
+# arm. Fields not listed here keep the value from the --base-config.
+#
+# distribution:
+#   uniform      real, uniform over [low, high]
+#   log_uniform  real, uniform in log-space over [low, high]   (low > 0)
+#   int_uniform  integer, uniform over [low, high] inclusive
+#   choice       categorical, uniform over `choices`
+#
+# This is the expanded space covering every safely-tunable knob (the built-in
+# bandit::default_search_space() is the minimal lr/clip/entropy/epochs/lambda
+# subset). NOTE: more dimensions need more arms to cover — with this many active
+# fields, run with --arms 27 (or 81) rather than the default 9, or comment out
+# the lower-impact knobs to concentrate samples.
+parameters:
+  # ── Optimizer / PPO loss ────────────────────────────────────────────────
+  - field: learning_rate
+    distribution: log_uniform
+    low: 1.0e-4
+    high: 1.0e-3
+
+  - field: clip_param
+    distribution: choice
+    choices: [0.1, 0.2, 0.3]   # run-1 winner sat at 0.3 (edge); consider uniform[0.1,0.3]
+
+  - field: value_loss_coef
+    distribution: uniform      # base v2 fixed this at 0.4 (lowish; 0.5-1.0 is typical)
+    low: 0.25
+    high: 1.0
+
+  - field: entropy_coef
+    distribution: log_uniform  # the high end (2.4e-2) plateaued low in run 1; consider 3.0e-3..1.5e-2
+    low: 1.0e-3
+    high: 3.0e-2
+
+  - field: num_epochs
+    distribution: int_uniform  # epochs=1 was the worst arm in run 1; consider [2, 5]
+    low: 1
+    high: 4
+
+  - field: max_gradient_norm
+    distribution: uniform
+    low: 0.3
+    high: 1.0
+
+  # ── Advantage estimation (GAE) ──────────────────────────────────────────
+  - field: gae_discount        # gamma
+    distribution: uniform
+    low: 0.98
+    high: 0.999
+
+  - field: gae_lambda
+    distribution: uniform
+    low: 0.90
+    high: 0.98
+
+  # ── Network capacity ────────────────────────────────────────────────────
+  - field: hidden_size         # FC width only (conv stack is fixed); bigger = slower/arm
+    distribution: choice
+    choices: [256, 512, 1024]
+
+  # ── Optional: safe, but niche / changes task semantics ───────────────────
+  # Uncomment to include. frame_skip changes env action-repeat (4 is the Atari
+  # standard; varying it makes runs less comparable to published results).
+  # num_workers is a pure throughput knob (no divisibility constraint).
+  #
+  # - field: frame_skip
+  #   distribution: choice
+  #   choices: [2, 3, 4, 5]
+  #
+  # - field: shuffle_mini_batches   # bool (0=false, 1=true); almost always best left true
+  #   distribution: choice
+  #   choices: [0, 1]
+  #
+  # - field: num_workers
+  #   distribution: choice
+  #   choices: [16, 24, 32, 48]
+
+  # ── Optional: batch geometry (now safe — mini_batch_size is derived) ──────
+  # Each rung trains from scratch, so varying the batch shape is legitimate.
+  # config::reconcile() derives mini_batch_size = horizon * total_environments /
+  # num_mini_batches, and validate() rejects any leftover bad combo (the arm
+  # scores -inf, it does not crash the search). The curated power-of-2 sets below
+  # keep EVERY combination valid for any horizon: the smallest pipeline group is
+  # 2048/4 = 512 (a multiple of every worker_batch_size), and num_mini_batches
+  # divides 2048. Never list mini_batch_size — it is derived. Adds up to 5 dims,
+  # so raise --arms accordingly (or run a batch-only search space).
+  #
+  # - field: total_environments
+  #   distribution: choice
+  #   choices: [2048, 4096, 8192]
+  #
+  # - field: horizon
+  #   distribution: int_uniform
+  #   low: 4
+  #   high: 16
+  #
+  # - field: num_mini_batches
+  #   distribution: choice
+  #   choices: [8, 16, 32]
+  #
+  # - field: pipeline_groups
+  #   distribution: choice
+  #   choices: [1, 2, 4]
+  #
+  # - field: worker_batch_size
+  #   distribution: choice
+  #   choices: [4, 8, 16]
+
+# ── DO NOT search — would break the run ────────────────────────────────────
+#   mini_batch_size  (DERIVED: config::reconcile() overwrites it from
+#                     horizon * total_environments / num_mini_batches — sample
+#                     num_mini_batches or horizon instead)
+#   frame_stack      (the network's conv input channels are hardcoded;
+#                     NetworkImpl takes only hidden_size/action_size, so a
+#                     different frame_stack shape-mismatches the policy)
+#
+# ── Not worth searching — env/task properties & run mechanics ──────────────
+# No effect on learning quality (or overridden by the tuner) — would waste arms:
+#   max_steps, max_return      (env/task properties; max_return is the game's
+#                               score cap used for env reset)
+#   num_rollouts               (meta_train forces this to "unbounded" per arm)
+#   cuda_graph, async_update, deterministic
+#                              (execution mechanics; async_update also conflicts
+#                               with deterministic — see validate())
+#   record_observation, record_video, checkpoint_interval
+#                              (I/O; the search records no per-arm artifacts)

@@ -14,7 +14,10 @@ refresh_compile_commands(
     name = "refresh_compile_commands",
     targets = {
         "//src:all": "",
+        "//src/ai:all": "",
+        "//src/ai/ppo:all": "",
         "//src/bin:all": "",
+        "//src/training:all": "",
         "//test/ai:all": "",
     },
 )

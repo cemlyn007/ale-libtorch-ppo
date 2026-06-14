@@ -38,8 +38,12 @@ void apply_field(Config &config, const std::string &name, double value) {
     using T = std::decay_t<decltype(field)>;
     if constexpr (std::is_same_v<T, bool>)
       field = (value != 0.0);
-    else
+    else if constexpr (std::is_arithmetic_v<T>)
       field = static_cast<T>(value);
+    else
+      // Non-numeric fields (e.g. resume_from) are not search-space tunable.
+      throw std::invalid_argument("Config field '" + name +
+                                  "' cannot be set from a numeric value.");
     found = true;
   });
   if (!found) throw std::invalid_argument("Unknown config field: " + name);

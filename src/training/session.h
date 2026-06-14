@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <functional>
+#include <limits>
 #include <memory>
 #include <optional>
 
@@ -31,6 +32,15 @@ class Session {
           std::optional<std::filesystem::path> video_path,
           const torch::Device &device, uint64_t seed);
 
+  // Non-movable and non-copyable: the action selector captures `this`, so a
+  // moved-from Session would leave the rollout calling into a dead object. A
+  // tuner driving many runs must hold them by pointer (e.g. a
+  // std::vector<std::unique_ptr<Session>>), not by value.
+  Session(const Session &) = delete;
+  Session &operator=(const Session &) = delete;
+  Session(Session &&) = delete;
+  Session &operator=(Session &&) = delete;
+
   // One (update, collect) iteration; nullopt once num_rollouts is exhausted.
   // The returned report is valid until the next step() call.
   std::optional<ai::ppo::RolloutReport> step() { return loop_->step(); }
@@ -42,18 +52,34 @@ class Session {
   // ALE's minimal action set size for this ROM, for hparam logging.
   size_t action_size() const { return action_size_; }
 
+  // Resume state restored from config.resume_from (defaults for a fresh run):
+  // the rollout index to resume at, the global-step offset that continues the
+  // TensorBoard timeline, and the best return so best.pt survives a resume.
+  size_t start_rollout_index() const { return start_rollout_index_; }
+  size_t step_offset() const { return step_offset_; }
+  double best_return() const { return best_return_; }
+
  private:
   // Publishes the learner's weights to the behaviour policy (async only).
   void sync_actor();
   std::function<ai::rollout::ActionResult(const torch::Tensor &)>
   make_action_selector();
 
-  // Declaration order matters for teardown: rollout_ (whose worker threads run
-  // the action selector that reads actor_/device_) must be destroyed before
-  // those members, so it is declared after them.
+  // Declaration order governs teardown (members destroyed in reverse). rollout_
+  // must be torn down before actor_/network_/device_/action_size_: the action
+  // selector captures `this` and reads them — it runs on the main thread inside
+  // Rollout::rollout(), and ~Rollout also joins the env-stepping workers, so
+  // both must finish while those members are still alive. loop_ holds the
+  // current_/next_ batches that alias rollout_'s buffers, so it is declared
+  // last to release them first. Hence rollout_/loop_ come after the state they
+  // use.
   torch::Device device_;
   bool async_update_;
   size_t action_size_ = 0;
+  // Resume state; defaults mean "fresh run" when config.resume_from is empty.
+  size_t start_rollout_index_ = 0;
+  size_t step_offset_ = 0;
+  double best_return_ = -std::numeric_limits<double>::infinity();
   Network network_{nullptr};
   Network actor_{nullptr};
   std::unique_ptr<torch::optim::Adam> optimizer_;

@@ -2,6 +2,8 @@
 
 #include <torch/torch.h>
 
+#include <cstddef>
+
 #include "ai/ppo/train.h"
 #include "ai/rollout.h"
 #include "ai/tensor_util.h"
@@ -11,11 +13,10 @@ namespace training {
 
 void log_rollout(TensorBoardLogger &logger, const ai::rollout::Log &log,
                  const ai::ppo::train::Metrics &metrics, double learning_rate,
-                 bool histograms) {
+                 size_t step, bool histograms) {
   using ai::tensor_util::gather;
   using ai::tensor_util::mean;
   using ai::tensor_util::to_vector;
-  const auto step = log.steps;
   const auto &masks = metrics.masks;
   auto scalar = [&](const char *tag, double v) {
     logger.add_scalar(tag, step, v);

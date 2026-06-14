@@ -1,8 +1,10 @@
 #include "training/session.h"
 
 #include <ale/ale_interface.hpp>
+#include <spdlog/spdlog.h>
 #include <utility>
 
+#include "ai/checkpoint.h"
 #include "ai/torch_runtime.h"
 #include "training/trainer.h"
 
@@ -27,6 +29,19 @@ Session::Session(const Config &config, std::filesystem::path rom_path,
   optimizer_ = std::make_unique<torch::optim::Adam>(
       network_->parameters(),
       torch::optim::AdamOptions(config.learning_rate).eps(1e-5));
+
+  // Restore before the actor snapshot and any CUDA-graph capture so both see
+  // the resumed weights/optimizer state. The rollout RNG and env state are not
+  // saved, so resumption is approximate, not bit-exact.
+  if (!config.resume_from.empty()) {
+    const ai::checkpoint::Checkpoint state = ai::checkpoint::load(
+        config.resume_from, *network_, *optimizer_, device_);
+    start_rollout_index_ = state.next_rollout_index;
+    step_offset_ = state.global_step;
+    best_return_ = state.best_return;
+    spdlog::info("Resumed from {} at rollout {} (global step {})",
+                 config.resume_from, start_rollout_index_, step_offset_);
+  }
 
   // Synchronous mode shares the learner's module as the behaviour policy; async
   // mode acts on a snapshot copy so the learner thread can write the real
@@ -83,7 +98,8 @@ Session::Session(const Config &config, std::filesystem::path rom_path,
 
   loop_ = std::make_unique<ai::ppo::Loop>(
       config.num_rollouts, config.learning_rate, *trainer_, *rollout_,
-      *metrics_, updater_.get(), [this] { sync_actor(); });
+      *metrics_, updater_.get(), [this] { sync_actor(); },
+      start_rollout_index_);
 }
 
 void Session::sync_actor() {

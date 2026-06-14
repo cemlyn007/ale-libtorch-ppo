@@ -33,9 +33,12 @@ std::map<std::string, google::protobuf::Value> get_parameters(
     const training::Config &config, size_t action_size) {
   std::map<std::string, google::protobuf::Value> hparams;
   auto put = [&](const char *name, const auto &field) {
+    using Field = std::decay_t<decltype(field)>;
     google::protobuf::Value value;
-    if constexpr (std::is_same_v<std::decay_t<decltype(field)>, bool>)
+    if constexpr (std::is_same_v<Field, bool>)
       value.set_bool_value(field);
+    else if constexpr (std::is_same_v<Field, std::string>)
+      value.set_string_value(field);
     else
       value.set_number_value(static_cast<double>(field));
     hparams[name] = value;
@@ -181,7 +184,8 @@ int main(int argc, char **argv) {
         // sweep trains many arms and the wall-clock budget drives the score, so
         // we keep per-rollout logging to cheap scalars.
         training::log_rollout(logger, *report->log, *report->metrics,
-                              report->learning_rate, /*histograms=*/false);
+                              report->learning_rate, report->global_step,
+                              /*histograms=*/false);
         if (report->mean_episode_return)
           curve.push_back(*report->mean_episode_return);
         const double elapsed = std::chrono::duration<double>(

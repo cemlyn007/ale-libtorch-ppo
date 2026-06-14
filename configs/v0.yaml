@@ -30,3 +30,5 @@ async_update: false
 deterministic: true
 # Save latest.pt every N rollouts and best.pt on return improvement; 0 disables.
 checkpoint_interval: 100
+# Path to a checkpoint .pt to resume from; empty starts fresh.
+resume_from: ""

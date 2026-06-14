@@ -2,6 +2,7 @@
 
 #include <spdlog/spdlog.h>
 
+#include <algorithm>
 #include <cassert>
 #include <numeric>
 
@@ -206,8 +207,17 @@ Rollout::create_environment(
       std::make_unique<ai::environment::Environment>(rom_path_, max_steps_,
                                                      grayscale_, i + seed);
 
-  // Atari breakout only has two sets of bricks, once the second set is
-  // cleared, no more bricks will appear.
+  // Probe the ROM so the Atari-specific wrappers below only apply where they
+  // fit: EpisodeLife throws on a 0-life game, and FIRE-to-start needs FIRE.
+  ale::ALEInterface &interface = environment->get_interface();
+  const bool has_lives = interface.lives() > 0;
+  const auto minimal_actions = interface.getMinimalActionSet();
+  const bool has_fire =
+      std::find(minimal_actions.begin(), minimal_actions.end(),
+                ale::Action::PLAYER_A_FIRE) != minimal_actions.end();
+
+  // Some games cap out at a known max score (e.g. Breakout); truncate there.
+  // max_return <= 0 disables it (a 0 ceiling would throw on the first step).
   if (max_return > 0.0f)
     environment =
         std::make_unique<ai::environment::TruncateOnEpisodeReturnEnvironment>(
@@ -234,10 +244,15 @@ Rollout::create_environment(
     environment = std::make_unique<ai::environment::EpisodeObservationRecorder>(
         std::move(environment), video_path.value(), grayscale_ ? 1 : 3, height_,
         width_, 60 / frame_skip);
-  environment =
-      std::make_unique<ai::environment::EpisodeLife>(std::move(environment));
-  environment =
-      std::make_unique<ai::environment::FireReset>(std::move(environment));
+  // Only games that track lives end an episode on life loss; EpisodeLife
+  // throws on a 0-life game (e.g. Pong), so skip it there.
+  if (has_lives)
+    environment =
+        std::make_unique<ai::environment::EpisodeLife>(std::move(environment));
+  // FIRE-to-start (Gym's FireResetEnv) only applies when FIRE is an action.
+  if (has_fire)
+    environment =
+        std::make_unique<ai::environment::FireReset>(std::move(environment));
   return environment;
 }
 

@@ -257,10 +257,11 @@ Rollout::create_environment(
 }
 
 Rollout::~Rollout() {
+  // Wake the workers blocked in action_queue_.pop() so they observe stop_ and
+  // exit. The batch contents don't matter: worker() skips the work once stop_
+  // is set, so teardown never steps or resets envs that are being destroyed --
+  // a reset() of env 0 here would re-open its still-open video recorder.
   stop_ = true;
-  // All-true episode starts route every env down the reset path, so workers
-  // never read the staged actions while draining this wake-up batch.
-  is_episode_start_cpu_.assign(total_environments_, true);
   std::vector<size_t> inputs(total_environments_);
   std::iota(inputs.begin(), inputs.end(), size_t{0});
   action_queue_.push(inputs);
@@ -425,6 +426,10 @@ void Rollout::worker() {
   while (!stop_) {
     auto inputs = action_queue_.pop(batch_size_);
     for (const auto &input : inputs) {
+      // ~Rollout() pushes a final batch only to unblock the pop() above; once
+      // stop_ is set there is no live rollout reading results, so skip the work
+      // rather than step/reset (and re-open env 0's recorder) on dying envs.
+      if (stop_) break;
       StepResult result = step(input);
       step_queues_[input / group_size_]->push(result);
     }

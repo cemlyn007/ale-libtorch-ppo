@@ -1,0 +1,11 @@
+# ALE Pac-Man environment: per-game truncation and frame preprocessing.
+# Composed onto a training config via --env; these keys win on overlap.
+
+# Pac-Man has no natural score cap — clearing mazes racks up points
+# indefinitely — so set the return cap high enough to never fire and let
+# max_steps bound the episode instead.
+max_return: 100000
+# Max steps per environment before an episode is truncated.
+max_steps: 64800
+frame_stack: 4
+frame_skip: 4

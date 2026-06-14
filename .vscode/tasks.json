@@ -50,7 +50,9 @@
                 "--group",
                 "${input:runName}",
                 "--config",
-                "${workspaceFolder}/configs/${input:configName}.yaml"
+                "${workspaceFolder}/configs/${input:configName}.yaml",
+                "--env",
+                "${workspaceFolder}/configs/envs/${input:envName}.yaml"
             ],
             "label": "run",
             "type": "shell",
@@ -77,6 +79,12 @@
             "description": "Enter the name for the config name",
             "type": "promptString",
             "default": "v0",
+        },
+        {
+            "id": "envName",
+            "description": "Enter the environment config name",
+            "type": "promptString",
+            "default": "breakout",
         }
     ]
 }

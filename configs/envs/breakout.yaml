@@ -1,0 +1,9 @@
+# ALE Breakout environment: per-game truncation and frame preprocessing.
+# Composed onto a training config via --env; these keys win on overlap.
+
+# Breakout's max possible score; reaching it truncates the episode.
+max_return: 864
+# Max steps per environment before an episode is truncated.
+max_steps: 64800
+frame_stack: 4
+frame_skip: 4

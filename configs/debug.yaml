@@ -1,8 +1,6 @@
 total_environments: 8
 hidden_size: 32
 horizon: 32
-max_steps: 64800
-frame_stack: 4
 learning_rate: 2.5e-4
 clip_param: 0.2
 value_loss_coef: 0.5
@@ -18,9 +16,6 @@ num_rollouts: 10
 num_workers: 1
 worker_batch_size: 1
 pipeline_groups: 1
-frame_skip: 4
-# Breakout max possible score.
-max_return: 864
 record_observation: false
 record_video: true
 cuda_graph: false

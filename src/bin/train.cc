@@ -118,13 +118,18 @@ struct Arguments {
 
 Arguments parse_arguments(int argc, char **argv) {
   CLI::App app{"Train a PPO agent on an Atari ROM."};
-  std::filesystem::path rom_path, log_path, config_path, video_dir,
+  std::filesystem::path rom_path, log_path, config_path, env_path, video_dir,
       profile_path;
   std::string group_name;
   app.add_option("--rom", rom_path, "Atari ROM to train on.")
       ->required()
       ->check(CLI::ExistingFile);
-  app.add_option("--config", config_path, "YAML config file.")
+  app.add_option("--config", config_path, "YAML training config.")
+      ->required()
+      ->check(CLI::ExistingFile);
+  app.add_option("--env", env_path,
+                 "YAML environment config (per-game truncation + frame "
+                 "preprocessing); composed onto --config, its keys winning.")
       ->required()
       ->check(CLI::ExistingFile);
   app.add_option("--log-path", log_path,
@@ -145,7 +150,7 @@ Arguments parse_arguments(int argc, char **argv) {
     std::exit(app.exit(e));
   }
 
-  training::Config config = training::load_config(config_path);
+  training::Config config = training::compose_config(config_path, env_path);
   // --video-dir is only consumed when the config asks to record, but a missing
   // path then would silently disable recording -- fail loudly instead.
   if (config.record_video && video_dir.empty()) {

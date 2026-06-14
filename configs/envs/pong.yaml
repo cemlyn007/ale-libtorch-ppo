@@ -1,0 +1,9 @@
+# ALE Pong environment: per-game truncation and frame preprocessing.
+# Composed onto a training config via --env; these keys win on overlap.
+
+# Pong is first-to-21, so a 21-0 shutout returns +21; truncate there.
+max_return: 21
+# Max steps per environment before an episode is truncated.
+max_steps: 64800
+frame_stack: 4
+frame_skip: 4

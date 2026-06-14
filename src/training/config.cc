@@ -8,15 +8,22 @@
 
 namespace training {
 
-Config load_config(const std::filesystem::path &path) {
+Config compose_config(const std::filesystem::path &training_path,
+                      const std::filesystem::path &environment_path) {
+  // Two flat YAML files bound into one Config: the environment file carries a
+  // game's truncation and frame settings, the training file the rest. A key in
+  // both resolves to the environment's, so per-game values override a training
+  // default. Every schema key must appear in at least one file; one missing
+  // from both is a hard error rather than a silent default.
+  const YAML::Node environment = YAML::LoadFile(environment_path.string());
+  const YAML::Node training = YAML::LoadFile(training_path.string());
   Config config;
-  YAML::Node node = YAML::LoadFile(path.string());
   for_each_field(config, [&](const char *name, auto &field) {
-    // Every key is required: a missing key is a hard error rather than a
-    // silent default.
-    if (!node[name])
+    const YAML::Node env_value = environment[name];
+    const YAML::Node value = env_value ? env_value : training[name];
+    if (!value)
       throw std::runtime_error(std::string("Missing config key: ") + name);
-    field = node[name].as<std::decay_t<decltype(field)>>();
+    field = value.as<std::decay_t<decltype(field)>>();
   });
   return config;
 }

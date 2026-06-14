@@ -29,14 +29,15 @@ To run the project, follow these steps:
 
 5. Train the agent using Bazel:
    ```shell
-   bazel run //src/bin:train --compilation_mode=opt -- --rom $(pwd)/roms/breakout.bin --log-path $(pwd)/logs/train --video-dir $(pwd)/videos/train --group train --config $(pwd)/configs/v0.yaml
+   bazel run //src/bin:train --compilation_mode=opt -- --rom $(pwd)/roms/breakout.bin --log-path $(pwd)/logs/train --video-dir $(pwd)/videos/train --group train --config $(pwd)/configs/v0.yaml --env $(pwd)/configs/envs/breakout.yaml
    ```
    Or alternatively, with VS Code, you can run the tasks. Pass `--help` to list every flag. The command line options do the following:
    - `--rom`: Path to the Atari ROM to train on.
    - `--log-path`: TensorBoard log path prefix; `.tfevents.<timestamp>` is appended at runtime.
    - `--video-dir`: Directory to write videos to (required when `record_video` is set in the config).
    - `--group`: Group name used when logging parameters to TensorBoard.
-   - `--config`: Path to the YAML file containing the config to use for running the application.
+   - `--config`: Path to the YAML training config (hyperparameters and run options).
+   - `--env`: Path to the YAML environment config (per-game truncation and frame preprocessing, e.g. `configs/envs/breakout.yaml`); composed onto `--config`, overriding any overlapping keys.
    - `--profile`: Optional path to write a libtorch profile to, which can be examined using Perfetto.
 
 ### Checkpointing

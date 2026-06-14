@@ -20,6 +20,8 @@
                 "debug_group",
                 "--config",
                 "${workspaceFolder}/configs/debug.yaml",
+                "--env",
+                "${workspaceFolder}/configs/envs/breakout.yaml",
             ],
             "stopAtEntry": false,
             "cwd": "${workspaceFolder}",
@@ -52,6 +54,8 @@
                 "debug_group",
                 "--config",
                 "${workspaceFolder}/configs/debug.yaml",
+                "--env",
+                "${workspaceFolder}/configs/envs/breakout.yaml",
             ],
             "sourceMap": {
                 "/proc/self/cwd": "${workspaceFolder}",

@@ -91,8 +91,12 @@ void for_each_field(Self &config, Visitor &&visit) {
   visit("resume_from", config.resume_from);
 }
 
-// Loads every key from a YAML file; a missing key is a hard error.
-Config load_config(const std::filesystem::path &path);
+// Composes one Config from a training YAML and an environment YAML, the latter
+// holding a game's truncation and frame settings so they live in one small file
+// shared across training configs. The environment's keys win where the two
+// overlap; a key missing from both files is a hard error.
+Config compose_config(const std::filesystem::path &training_path,
+                      const std::filesystem::path &environment_path);
 
 // Rejects internally-inconsistent configs. Throws std::invalid_argument so a
 // tuner can reject one bad arm without taking down the process.

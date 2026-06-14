@@ -1,55 +1,110 @@
-load("@rules_foreign_cc//foreign_cc:defs.bzl", "cmake")
+load("@rules_cc//cc:defs.bzl", "cc_library")
 
-filegroup(
-    name = "ale_sources",
-    srcs = glob(["**"]),
-    visibility = ["//visibility:public"],
+# Native Bazel build of ALE's C++ core, replacing the upstream CMake build.
+# Scope matches the old cmake() config -- C++ lib only, SDL/vector/python off
+# (the SDL-named sources are internally #ifdef'd to stubs). The srcs globs
+# cover the target_sources lists in src/ale/*/CMakeLists.txt exactly.
+
+# configure_file(version.hpp.in) equivalent. The release tarball has no git
+# metadata, so the SHA is upstream's "unknown" fallback.
+genrule(
+    name = "version_hpp",
+    srcs = ["version.txt"],
+    outs = ["src/ale/version.hpp"],
+    cmd = """v=$$(tr -d '[:space:]' < $<); IFS=. read -r major minor patch <<<"$$v"; cat > $@ <<EOF
+#ifndef __VERSION_HPP__
+#define __VERSION_HPP__
+
+#define ALE_VERSION "$$v"
+#define ALE_VERSION_MAJOR "$$major"
+#define ALE_VERSION_MINOR "$$minor"
+#define ALE_VERSION_PATCH "$$patch"
+#define ALE_VERSION_GIT_SHA "unknown"
+
+// This isn't entirely accurate, there's been
+// some changes post 2.4.2.
+#define STELLA_VERSION "2.4.2"
+
+#endif // __VERSION_HPP__
+EOF""",
 )
 
-cmake(
+# Match upstream's Release build in every -c mode, plus quiet its warnings
+# (the emulator code trips -Wall; severity only, our -Werror exempts external/).
+_BASE_COPTS = [
+    "-O3",
+    "-DNDEBUG",
+    "-Wno-unused-but-set-variable",
+    "-Wno-unused-variable",
+    "-Wno-sequence-point",
+    "-Wno-sign-compare",
+    "-Wno-stringop-overflow",
+]
+
+# PGO for the emulator hot loop (~+10% stepping throughput), selected via
+# @//third_party:ale_pgo; scripts/ale_pgo.sh drives the gen->run->use cycle.
+# Sandboxing is no obstacle: Bazel compiles with PWD=/proc/self/cwd, so the
+# cwd GCC bakes into each .gcda name (and resolves the relative -fprofile-use
+# dir against) is identical across sandboxes and builds.
+_PGO_GEN_COPTS = [
+    "-fomit-frame-pointer",
+    "-fprofile-generate=/tmp/ale-bazel-pgo",
+]
+
+# -fprofile-correction: profiles come from multithreaded runs with racy
+# counter updates. Missing profiles (carts the run never loaded) only warn.
+_PGO_USE_COPTS = [
+    "-fomit-frame-pointer",
+    "-fprofile-use=third_party/ale-pgo",
+    "-fprofile-correction",
+    "-Wno-missing-profile",
+]
+
+cc_library(
     name = "ale",
-    cache_entries = {
-        "BUILD_CPP_LIB": "ON",
-        "BUILD_PYTHON_LIB": "OFF",
-        "BUILD_VECTOR_LIB": "OFF",
-        "BUILD_VECTOR_XLA_LIB": "OFF",
-        "SDL_SUPPORT": "OFF",
-    },
-    copts = select({
-        "@platforms//os:linux": [
-            "-Wno-error=unused-but-set-variable",
-            "-Wno-error=unused-variable",
-            "-Wno-error=sequence-point",
-            "-Wno-error=sign-compare",
-            "-Wno-error=stringop-overflow",
+    srcs = glob([
+        "src/ale/common/*.cpp",
+        "src/ale/common/*.cxx",
+        "src/ale/emucore/*.cxx",
+        "src/ale/environment/*.cpp",
+        "src/ale/games/*.cpp",
+        "src/ale/games/supported/*.cpp",
+    ]) + ["src/ale/ale_interface.cpp"],
+    hdrs = glob(
+        [
+            "src/ale/**/*.h",
+            "src/ale/**/*.hpp",
+            "src/ale/**/*.hxx",
         ],
-        "@platforms//os:macos": [
-            "-Wno-error=unused-but-set-variable",
-            "-Wno-error=unused-variable",
-            "-Wno-error=unused-private-field",
-            "-Wno-inconsistent-missing-override",
+        exclude = [
+            "src/ale/external/**",
+            "src/ale/python/**",
+            "src/ale/vector/**",
         ],
+        allow_empty = True,
+    ) + ["src/ale/version.hpp"],
+    # M6502 instruction tables, #included mid-class by the CPU cores.
+    textual_hdrs = glob(["src/ale/emucore/*.ins"]),
+    copts = _BASE_COPTS + select({
+        "@//third_party:ale_pgo_gen": _PGO_GEN_COPTS,
+        "@//third_party:ale_pgo_use": _PGO_USE_COPTS,
         "//conditions:default": [],
     }),
-    generate_args = select({
-        "@platforms//os:macos": [
-            "-DCMAKE_OSX_DEPLOYMENT_TARGET=15.0",
-            "-DCMAKE_AR=/usr/bin/ar",
-            "-DCMAKE_RANLIB=/usr/bin/ranlib",
-        ],
+    additional_compiler_inputs = select({
+        "@//third_party:ale_pgo_use": ["@//third_party:ale_pgo_profiles"],
         "//conditions:default": [],
     }),
-    lib_source = ":ale_sources",
-    linkopts = select({
-        "@platforms//os:linux": [
-            "-lpthread",
-        ],
-        "@platforms//os:macos": ["-lpthread"],
-        "//conditions:default": [],
-    }),
-    out_static_libs = ["libale.a"],
-    visibility = ["//visibility:public"],
-    deps = [
-        "@zlib",
+    # src: internal + consumer `ale/...` includes; src/ale: ale_interface.hpp's
+    # quote-include of the generated version.hpp.
+    includes = [
+        "src",
+        "src/ale",
     ],
+    linkopts = ["-lpthread"] + select({
+        # The instrumented objects need libgcov in the consuming binary.
+        "@//third_party:ale_pgo_gen": ["-fprofile-generate"],
+        "//conditions:default": [],
+    }),
+    visibility = ["//visibility:public"],
+    deps = ["@zlib"],
 )

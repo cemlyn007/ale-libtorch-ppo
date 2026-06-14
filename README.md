@@ -40,6 +40,24 @@ To run the project, follow these steps:
    - `--env`: Path to the YAML environment config (per-game truncation and frame preprocessing, e.g. `configs/envs/breakout.yaml`); composed onto `--config`, overriding any overlapping keys.
    - `--profile`: Optional path to write a libtorch profile to, which can be examined using Perfetto.
 
+### Profile-Guided Optimisation
+
+Environment stepping (the ALE emulator) dominates training time, and a profile-guided build of ALE is wired into the Bazel setup — worth roughly +10% end-to-end training throughput. Generate the profiles once:
+
+```shell
+./scripts/ale_pgo.sh
+```
+
+The script builds an instrumented emulator, profiles ~90 seconds of real training, harvests the profiles into `third_party/ale-pgo/` (gitignored), and rebuilds with them applied. `ROM=`, `CONFIG=` and `PROFILE_SECONDS=` environment variables override the defaults (Breakout, `configs/v0.yaml`, 90s).
+
+Afterwards, add `--config=ale-pgo-use` to any build or run to keep the optimised emulator:
+
+```shell
+bazel run //src/bin:train --compilation_mode=opt --config=ale-pgo-use -- --rom $(pwd)/roms/breakout.bin --log-path $(pwd)/logs/train --video-dir $(pwd)/videos/train --group train --config $(pwd)/configs/v0.yaml
+```
+
+Profiles are specific to this machine, checkout and GCC version — re-run the script after bumping ALE or the compiler. Missing or stale profiles only warn; the build falls back to the regular optimisation level. `./scripts/flamegraph.sh` is unaffected: it profiles the default (non-PGO) build, which keeps frame pointers for readable stacks.
+
 ### Checkpointing
 
 Each run is a self-contained directory — `<base>.<start_time>/` — holding its TensorBoard event file and its checkpoints (`latest.pt`, `best.pt`). Two config keys control checkpointing (see any file in `configs/`):
